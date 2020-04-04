@@ -54,7 +54,10 @@ import org.hyperledger.fabric.sdk.Channel.PeerOptions;
 import org.hyperledger.fabric.sdk.Peer.PeerRole;
 import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
 import org.hyperledger.fabric.sdk.exception.NetworkConfigurationException;
+import org.hyperledger.fabric.sdk.identity.X509Enrollment;
+import org.hyperledger.fabric.sdk.security.CryptoSuite;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import static java.lang.String.format;
 import static org.hyperledger.fabric.sdk.helper.Utils.isNullOrEmpty;
@@ -224,6 +227,31 @@ public class NetworkConfig {
         setNodeProperties("EventHub", name, eventHubs, properties);
     }
 
+    private String getNodeUrl(String type, String name, Map<String, Node> nodes) throws InvalidArgumentException {
+        if (isNullOrEmpty(name)) {
+            throw new InvalidArgumentException("Parameter name is null or empty.");
+        }
+
+        Node node = nodes.get(name);
+        if (node == null) {
+            throw new InvalidArgumentException(format("%s %s not found.", type, name));
+        }
+
+        return node.getUrl();
+    }
+
+    /**
+     * Get URL for a specific peer.
+     *
+     * @param name Name of peer to get the URL for.
+     * @return The peer's URL.
+     * @throws InvalidArgumentException
+     */
+    public String getPeerUrl(String name) throws InvalidArgumentException {
+        return getNodeUrl("Peer", name, peers);
+
+    }
+
     // Organizations, keyed on org name (and not on mspid!)
     private Map<String, OrgInfo> organizations;
 
@@ -307,7 +335,7 @@ public class NetworkConfig {
             throw new InvalidArgumentException("configStream must be specified");
         }
 
-        Yaml yaml = new Yaml();
+        Yaml yaml = new Yaml(new SafeConstructor());
 
         @SuppressWarnings ("unchecked")
         Map<String, Object> map = yaml.load(configStream);
@@ -651,11 +679,6 @@ public class NetworkConfig {
                 }
             }
 
-            if (!foundOrderer) {
-                // orderers is a required field
-                throw new NetworkConfigurationException(format("Error constructing channel %s. At least one orderer must be specified", channelName));
-            }
-
             // peers is an object containing a nested object for each peer
             JsonObject jsonPeers = getJsonObject(jsonChannel, "peers");
             boolean foundPeer = false;
@@ -682,10 +705,10 @@ public class NetworkConfig {
 
                     // Set the various roles
                     PeerOptions peerOptions = PeerOptions.createPeerOptions();
-                    setPeerRole(channelName, peerOptions, jsonPeer, PeerRole.ENDORSING_PEER);
-                    setPeerRole(channelName, peerOptions, jsonPeer, PeerRole.CHAINCODE_QUERY);
-                    setPeerRole(channelName, peerOptions, jsonPeer, PeerRole.LEDGER_QUERY);
-                    setPeerRole(channelName, peerOptions, jsonPeer, PeerRole.EVENT_SOURCE);
+
+                    for (PeerRole peerRole : PeerRole.values()) {
+                        setPeerRole(channelName, peerOptions, jsonPeer, peerRole);
+                    }
 
                     foundPeer = true;
 
@@ -716,7 +739,7 @@ public class NetworkConfig {
     }
 
     private static void setPeerRole(String channelName, PeerOptions peerOptions, JsonObject jsonPeer, PeerRole role) throws NetworkConfigurationException {
-        String propName = role.getPropertyName();
+        String propName = roleNameRemap(role);
         JsonValue val = jsonPeer.get(propName);
         if (val != null) {
             Boolean isSet = getJsonValueAsBoolean(val);
@@ -728,6 +751,17 @@ public class NetworkConfig {
                 peerOptions.addPeerRole(role);
             }
         }
+    }
+
+    private static Map<PeerRole, String> roleNameRemapHash = new HashMap<PeerRole, String>() {
+        {
+            put(PeerRole.SERVICE_DISCOVERY, "discover");
+        }
+    };
+
+    private static String roleNameRemap(PeerRole peerRole) {
+        String remap = roleNameRemapHash.get(peerRole);
+        return remap == null ? peerRole.getPropertyName() : remap;
     }
 
     // Returns a new Orderer instance for the specified orderer name
@@ -805,9 +839,19 @@ public class NetworkConfig {
         JsonArray jsonPeers = getJsonValueAsArray(jsonOrg.get("peers"));
         if (jsonPeers != null) {
             for (JsonValue peer : jsonPeers) {
-                String peerName = getJsonValueAsString(peer);
+                final String peerName = getJsonValueAsString(peer);
                 if (peerName != null) {
                     org.addPeerName(peerName);
+                    final Node node = peers.get(peerName);
+                    if (null != node) {
+                        if (null == node.properties) {
+                            node.properties = new Properties();
+                        }
+                        node.properties.put(Peer.PEER_ORGANIZATION_MSPID_PROPERTY, org.getMspId());
+
+                    } else {
+                        throw new NetworkConfigurationException(format("Organization %s has peer %s listed not found in any channel peer list.", orgName, peerName));
+                    }
                 }
             }
         }
@@ -845,18 +889,12 @@ public class NetworkConfig {
 
             final PrivateKey privateKeyFinal = privateKey;
 
-            org.peerAdmin = new UserInfo(mspId, "PeerAdmin_" + mspId + "_" + orgName, null);
-            org.peerAdmin.setEnrollment(new Enrollment() {
-                @Override
-                public PrivateKey getKey() {
-                    return privateKeyFinal;
-                }
-
-                @Override
-                public String getCert() {
-                    return signedCert;
-                }
-            });
+            try {
+                org.peerAdmin = new UserInfo(CryptoSuite.Factory.getCryptoSuite(), mspId, "PeerAdmin_" + mspId + "_" + orgName, null);
+            } catch (Exception e) {
+                throw new NetworkConfigurationException(e.getMessage(), e);
+            }
+            org.peerAdmin.setEnrollment(new X509Enrollment(privateKeyFinal, signedCert));
 
         }
 
@@ -926,7 +964,11 @@ public class NetworkConfig {
             for (JsonObject reg : registrars) {
                 enrollId = getJsonValueAsString(reg.get("enrollId"));
                 enrollSecret = getJsonValueAsString(reg.get("enrollSecret"));
-                regUsers.add(new UserInfo(org.mspId, enrollId, enrollSecret));
+                try {
+                    regUsers.add(new UserInfo(CryptoSuite.Factory.getCryptoSuite(), org.mspId, enrollId, enrollSecret));
+                } catch (Exception e) {
+                    throw new NetworkConfigurationException(e.getMessage(), e);
+                }
             }
         }
 
@@ -1126,6 +1168,7 @@ public class NetworkConfig {
         private String account;
         private String affiliation;
         private Enrollment enrollment;
+        private CryptoSuite suite;
 
         public void setEnrollSecret(String enrollSecret) {
             this.enrollSecret = enrollSecret;
@@ -1155,7 +1198,8 @@ public class NetworkConfig {
             this.enrollment = enrollment;
         }
 
-        UserInfo(String mspid, String name, String enrollSecret) {
+        UserInfo(CryptoSuite suite, String mspid, String name, String enrollSecret) {
+            this.suite = suite;
             this.name = name;
             this.enrollSecret = enrollSecret;
             this.mspid = mspid;
@@ -1190,6 +1234,7 @@ public class NetworkConfig {
             return enrollment;
         }
 
+        @Override
         public String getMspId() {
             return mspid;
         }

@@ -61,7 +61,7 @@ public class EndpointTest {
             new Endpoint("grpcs://localhost", null);
             Assert.fail("should have thrown error as there is no port in the url");
         } catch (RuntimeException rex) {
-            Assert.assertEquals("URL must be of the format protocol://host:port", rex.getMessage());
+            Assert.assertEquals("URL must be of the format protocol://host:port. Found: 'grpcs://localhost'", rex.getMessage());
         }
 
         try {
@@ -203,7 +203,7 @@ public class EndpointTest {
     @Test
     public void testBadClientKeyFile() {
         thrown.expect(RuntimeException.class);
-        thrown.expectMessage("Failed to parse TLS client private key");
+        thrown.expectMessage("Failed endpoint grpcs://localhost:594 to parse TLS client private key");
 
         Properties testprops = new Properties();
         testprops.setProperty("trustServerCertificate", "true");
@@ -220,7 +220,7 @@ public class EndpointTest {
     @Test
     public void testBadClientCertFile() {
         thrown.expect(RuntimeException.class);
-        thrown.expectMessage("Failed to parse TLS client certificate");
+        thrown.expectMessage("Failed endpoint grpcs://localhost:594 to parse TLS client certificate");
 
         Properties testprops = new Properties();
         testprops.setProperty("trustServerCertificate", "true");
@@ -267,7 +267,7 @@ public class EndpointTest {
         try {
             new Endpoint("grpcs://localhost:594", testprops);
         } catch (RuntimeException e) {
-            Assert.assertEquals("Failed to parse TLS client private key", e.getMessage());
+            Assert.assertTrue(e.getMessage().contains("Failed endpoint grpcs://localhost:594 to parse TLS client private key"));
         }
     }
 
@@ -304,8 +304,8 @@ public class EndpointTest {
 
         Properties testprops = new Properties();
 
-        testprops.setProperty("pemFile", "src/test/fixture/testPems/caBundled.pems," + // has 3 certs
-                " src/test/fixture/testPems/Org1MSP_CA.pem"); // has 1
+        testprops.setProperty("pemFile", "src/test/fixture/testPems/caBundled.pems," + // has 4 certs
+                "src/test/fixture/testPems/AnotherUniqCA.pem"); // has 1
 
         testprops.put("pemBytes", Files.readAllBytes(Paths.get("src/test/fixture/testPems/Org2MSP_CA.pem"))); //Can have pem bytes too. 1 cert
 
@@ -332,7 +332,8 @@ public class EndpointTest {
                 new BigInteger("127556113420528788056877188419421545986539833585"),
                 new BigInteger("704500179517916368023344392810322275871763581896"),
                 new BigInteger("70307443136265237483967001545015671922421894552"),
-                new BigInteger("276393268186007733552859577416965113792")));
+                new BigInteger("276393268186007733552859577416965113792"),
+                new BigInteger("217904166635533061823782766071154643254")));
 
         for (X509Certificate cert : certs) {
             final BigInteger serialNumber = cert.getSerialNumber();

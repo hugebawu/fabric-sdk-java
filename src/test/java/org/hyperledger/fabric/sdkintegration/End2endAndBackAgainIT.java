@@ -70,6 +70,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.hyperledger.fabric.sdk.BlockInfo.EnvelopeType.TRANSACTION_ENVELOPE;
 import static org.hyperledger.fabric.sdk.Channel.PeerOptions.createPeerOptions;
 import static org.hyperledger.fabric.sdk.testutils.TestUtils.resetConfig;
+import static org.hyperledger.fabric.sdk.testutils.TestUtils.testRemovingAddingPeersOrderers;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -83,6 +84,7 @@ import static org.junit.Assert.fail;
 public class End2endAndBackAgainIT {
 
     private static final TestConfig testConfig = TestConfig.getConfig();
+    private static final int DEPLOYWAITTIME = testConfig.getDeployWaitTime();
     private static final boolean IS_FABRIC_V10 = testConfig.isRunningAgainstFabric10();
     private static final String TEST_ADMIN_NAME = "admin";
     private static final String TESTUSER_1_NAME = "user1";
@@ -110,14 +112,6 @@ public class End2endAndBackAgainIT {
     ChaincodeID chaincodeID_11 = ChaincodeID.newBuilder().setName(CHAIN_CODE_NAME)
             .setVersion(CHAIN_CODE_VERSION_11)
             .setPath(CHAIN_CODE_PATH).build();
-
-//    @After
-//    public void clearConfig() {
-//        try {
-// //           configHelper.clearConfig();
-//        } catch (Exception e) {
-//        }
-//    }
 
     private static boolean checkInstalledChaincode(HFClient client, Peer peer, String ccName, String ccPath, String ccVersion) throws InvalidArgumentException, ProposalException {
 
@@ -316,6 +310,9 @@ public class End2endAndBackAgainIT {
 
             client.setUserContext(sampleOrg.getUser(TESTUSER_1_NAME));
 
+            //This is for testing only and can be ignored.
+            testRemovingAddingPeersOrderers(client, channel);
+
 //            final boolean changeContext = false; // BAR_CHANNEL_NAME.equals(channel.getName()) ? true : false;
             final boolean changeContext = BAR_CHANNEL_NAME.equals(channel.getName());
 
@@ -400,7 +397,7 @@ public class End2endAndBackAgainIT {
 
                     UpgradeProposalRequest upgradeProposalRequest = client.newUpgradeProposalRequest();
                     upgradeProposalRequest.setChaincodeID(chaincodeID_11);
-                    upgradeProposalRequest.setProposalWaitTime(testConfig.getProposalWaitTime());
+                    upgradeProposalRequest.setProposalWaitTime(DEPLOYWAITTIME);
                     upgradeProposalRequest.setFcn("init");
                     upgradeProposalRequest.setArgs(new String[] {});    // no arguments don't change the ledger see chaincode.
 
@@ -470,21 +467,24 @@ public class End2endAndBackAgainIT {
                     for (Peer peer : channel.getPeers()) {
 
                         if (!checkInstalledChaincode(client, peer, CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_VERSION_11)) {
-                            throw new AssertionError(format("Peer %s is missing chaincode name:%s, path:%s, version: %s",
-                                    peer.getName(), CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_PATH));
+
+                            fail(format("Peer %s is missing installed chaincode name:%s, path:%s, version: %s",
+                                    peer, CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_VERSION_11));
+
                         }
 
                         //should be instantiated too..
                         if (!checkInstantiatedChaincode(channel, peer, CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_VERSION_11)) {
 
-                            throw new AssertionError(format("Peer %s is missing instantiated chaincode name:%s, path:%s, version: %s",
-                                    peer.getName(), CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_PATH));
+                            fail(format("Peer %s is missing instantiated chaincode name:%s, path:%s, version: %s",
+                                    peer, CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_VERSION_11));
+
                         }
 
                         if (checkInstantiatedChaincode(channel, peer, CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_VERSION)) {
 
-                            throw new AssertionError(format("Peer %s still has old instantiated chaincode name:%s, path:%s, version: %s",
-                                    peer.getName(), CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_PATH));
+                            fail(format("Peer %s still has old instantiated chaincode name:%s, path:%s, version: %s",
+                                    peer, CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_VERSION));
                         }
 
                     }
@@ -611,7 +611,7 @@ public class End2endAndBackAgainIT {
                 assertFalse(newChannel.getPeers(PeerRole.NO_EVENT_SOURCE).isEmpty());
 
             }
-            assertEquals(2, newChannel.getEventHubs().size());
+            assertEquals(testConfig.isFabricVersionAtOrAfter("1.3") ? 0 : 2, newChannel.getEventHubs().size());
             out("Retrieved channel %s from sample store.", name);
 
         } else {
@@ -631,11 +631,11 @@ public class End2endAndBackAgainIT {
                 Peer peer = client.newPeer(peerName, peerLocation, peerProperties);
                 final PeerOptions peerEventingOptions = // we have two peers on one use block on other use filtered
                         everyOther ?
-                                createPeerOptions().registerEventsForBlocks() :
-                                createPeerOptions().registerEventsForFilteredBlocks();
+                                createPeerOptions().registerEventsForBlocks().setPeerRoles(EnumSet.of(PeerRole.ENDORSING_PEER, PeerRole.LEDGER_QUERY, PeerRole.CHAINCODE_QUERY, PeerRole.EVENT_SOURCE)) :
+                                createPeerOptions().registerEventsForFilteredBlocks().setPeerRoles(EnumSet.of(PeerRole.ENDORSING_PEER, PeerRole.LEDGER_QUERY, PeerRole.CHAINCODE_QUERY, PeerRole.EVENT_SOURCE));
 
                 newChannel.addPeer(peer, IS_FABRIC_V10 ?
-                        createPeerOptions().setPeerRoles(PeerRole.NO_EVENT_SOURCE) : peerEventingOptions);
+                        createPeerOptions().setPeerRoles(EnumSet.of(PeerRole.ENDORSING_PEER, PeerRole.LEDGER_QUERY, PeerRole.CHAINCODE_QUERY)) : peerEventingOptions);
 
                 everyOther = !everyOther;
             }
@@ -727,14 +727,17 @@ public class End2endAndBackAgainIT {
         for (Peer peer : newChannel.getPeers()) {
 
             if (!checkInstalledChaincode(client, peer, CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_VERSION)) {
-                throw new AssertionError(format("Peer %s is missing chaincode name: %s, path:%s, version: %s",
-                        peer.getName(), CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_PATH));
+
+                fail(format("Peer %s is missing chaincode name: %s, path:%s, version: %s",
+                        peer.getName(), CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_VERSION));
+
             }
 
             if (!checkInstantiatedChaincode(newChannel, peer, CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_VERSION)) {
 
-                throw new AssertionError(format("Peer %s is missing instantiated chaincode name: %s, path:%s, version: %s",
-                        peer.getName(), CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_PATH));
+                fail(format("Peer %s is missing instantiated chaincode name: %s, path:%s, version: %s",
+                        peer.getName(), CHAIN_CODE_NAME, CHAIN_CODE_PATH, CHAIN_CODE_VERSION));
+
             }
 
         }
@@ -779,8 +782,10 @@ public class End2endAndBackAgainIT {
             replayTestChannel.removePeer(peer);
         }
         assertTrue(savedPeers.size() > 1); //need at least two
-        final Peer eventingPeer = savedPeers.remove(0);
+        Peer eventingPeer = savedPeers.remove(0);
+        eventingPeer = client.newPeer(eventingPeer.getName(), eventingPeer.getUrl(), eventingPeer.getProperties());
         Peer ledgerPeer = savedPeers.remove(0);
+        ledgerPeer = client.newPeer(ledgerPeer.getName(), ledgerPeer.getUrl(), ledgerPeer.getProperties());
 
         assertTrue(replayTestChannel.getPeers().isEmpty()); // no more peers.
         assertTrue(replayTestChannel.getPeers(EnumSet.of(PeerRole.CHAINCODE_QUERY, PeerRole.ENDORSING_PEER)).isEmpty()); // just checking :)

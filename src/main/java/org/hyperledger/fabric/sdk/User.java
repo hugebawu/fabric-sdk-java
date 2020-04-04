@@ -14,91 +14,89 @@
 
 package org.hyperledger.fabric.sdk;
 
-import static java.lang.String.format;
-
 import java.util.Set;
 
 import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
 import org.hyperledger.fabric.sdk.helper.Utils;
+import org.hyperledger.fabric.sdk.identity.X509Enrollment;
+
+import static java.lang.String.format;
 
 /**
- * User - Is the interface needed to be implemented by embedding application of
- * the SDK
+ * User - Is the interface needed to be implemented by embedding application of the SDK
  */
 public interface User {
 
-	/**
-	 * Get the name that identifies the user.
-	 *
-	 * @return the user name.
-	 */
+    /**
+     * Get the name that identifies the user.
+     *
+     * @return the user name.
+     */
 
-	String getName();
+    String getName();
 
-	/**
-	 * Get the roles to which the user belongs.
-	 *
-	 * @return role names.
-	 */
-	Set<String> getRoles();
+    /**
+     * Get the roles to which the user belongs.
+     *
+     * @return role names.
+     */
+    Set<String> getRoles();
 
-	/**
-	 * Get the user's account 获取账户信息
-	 *
-	 * @return the account name
-	 */
-	String getAccount();
+    /**
+     * Get the user's account
+     *
+     * @return the account name
+     */
+    String getAccount();
 
-	/**
-	 * Get the user's affiliation. 从属联盟
-	 * 
-	 * @return the affiliation.
-	 */
-	String getAffiliation();
+    /**
+     * Get the user's affiliation.
+     *
+     * @return the affiliation.
+     */
+    String getAffiliation();
 
-	/**
-	 * Get the user's enrollment certificate information. 获取注册登记操作信息
-	 * 
-	 * @return the enrollment information.
-	 */
-	Enrollment getEnrollment();
+    /**
+     * Get the user's enrollment certificate information.
+     *
+     * @return the enrollment information.
+     */
+    Enrollment getEnrollment();
 
-	/**
-	 * Get the Membership Service Provider Identifier provided by the user's
-	 * organization. 获取会员ID信息
-	 *
-	 * @return MSP Id.
-	 */
-	String getMspId();
+    /**
+     * Get the Membership Service Provider Identifier provided by the user's organization.
+     *
+     * @return MSP Id.
+     */
+    String getMspId();
 
-	static void userContextCheck(User userContext) throws InvalidArgumentException {
+    static void userContextCheck(User userContext) throws InvalidArgumentException {
 
-		if (userContext == null) {
-			throw new InvalidArgumentException("UserContext is null");
-		}
-		final String userName = userContext.getName();
-		if (Utils.isNullOrEmpty(userName)) {
-			throw new InvalidArgumentException("UserContext user's name missing.");
-		}
+        if (userContext == null) {
+            throw new InvalidArgumentException("UserContext is null");
+        }
+        final String userName = userContext.getName();
+        if (Utils.isNullOrEmpty(userName)) {
+            throw new InvalidArgumentException("UserContext user's name missing.");
+        }
 
-		Enrollment enrollment = userContext.getEnrollment();
-		if (enrollment == null) {
-			throw new InvalidArgumentException(format("UserContext for user %s has no enrollment set.", userName));
-		}
+        Enrollment enrollment = userContext.getEnrollment();
+        if (enrollment == null) {
+            throw new InvalidArgumentException(format("UserContext for user %s has no enrollment set.", userName));
+        }
+        if (enrollment instanceof X509Enrollment) {
+            if (Utils.isNullOrEmpty(enrollment.getCert())) {
+                throw new InvalidArgumentException(format("UserContext for user %s enrollment missing user certificate.", userName));
+            }
+            if (null == enrollment.getKey()) {
+                throw new InvalidArgumentException(format("UserContext for user %s has Enrollment missing signing key", userName));
+            }
+        }
 
-		if (Utils.isNullOrEmpty(userContext.getMspId())) {
-			throw new InvalidArgumentException(format("UserContext for user %s  has user's MSPID missing.", userName));
-		}
+        if (Utils.isNullOrEmpty(userContext.getMspId())) {
+            throw new InvalidArgumentException(format("UserContext for user %s  has user's MSPID missing.", userName));
+        }
 
-		if (Utils.isNullOrEmpty(enrollment.getCert())) {
-			throw new InvalidArgumentException(
-					format("UserContext for user %s enrollment missing user certificate.", userName));
-		}
-		if (null == enrollment.getKey()) {
-			throw new InvalidArgumentException(
-					format("UserContext for user %s has Enrollment missing signing key", userName));
-		}
-
-	}
+    }
 
 }

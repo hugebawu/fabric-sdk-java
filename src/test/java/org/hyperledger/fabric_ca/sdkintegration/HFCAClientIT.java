@@ -20,6 +20,7 @@ import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.CertificateParsingException;
 import java.security.cert.X509Certificate;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -40,6 +41,8 @@ import org.bouncycastle.asn1.x509.TBSCertList;
 import org.bouncycastle.cert.X509CRLHolder;
 import org.bouncycastle.openssl.PEMParser;
 import org.hyperledger.fabric.sdk.Enrollment;
+import org.hyperledger.fabric.sdk.User;
+import org.hyperledger.fabric.sdk.identity.IdemixEnrollment;
 import org.hyperledger.fabric.sdk.security.CryptoSuite;
 import org.hyperledger.fabric.sdk.testutils.TestConfig;
 import org.hyperledger.fabric.sdkintegration.SampleStore;
@@ -48,9 +51,13 @@ import org.hyperledger.fabric_ca.sdk.Attribute;
 import org.hyperledger.fabric_ca.sdk.EnrollmentRequest;
 import org.hyperledger.fabric_ca.sdk.HFCAAffiliation;
 import org.hyperledger.fabric_ca.sdk.HFCAAffiliation.HFCAAffiliationResp;
+import org.hyperledger.fabric_ca.sdk.HFCACertificateRequest;
+import org.hyperledger.fabric_ca.sdk.HFCACertificateResponse;
 import org.hyperledger.fabric_ca.sdk.HFCAClient;
+import org.hyperledger.fabric_ca.sdk.HFCACredential;
 import org.hyperledger.fabric_ca.sdk.HFCAIdentity;
 import org.hyperledger.fabric_ca.sdk.HFCAInfo;
+import org.hyperledger.fabric_ca.sdk.HFCAX509Certificate;
 import org.hyperledger.fabric_ca.sdk.MockHFCAClient;
 import org.hyperledger.fabric_ca.sdk.RegistrationRequest;
 import org.hyperledger.fabric_ca.sdk.exception.EnrollmentException;
@@ -89,6 +96,7 @@ public class HFCAClientIT {
     private static final String TEST_USER1_ORG = "Org2";
     private static final String TEST_USER1_AFFILIATION = "org1.department1";
     private static final String TEST_WITH_INTEGRATION_ORG = "peerOrg1";
+    private static final String TEST_WITH_INTEGRATION_ORG_CA = "ca0";
     private static final String TEST_WITH_INTEGRATION_ORG2 = "peerOrg2";
 
     private SampleStore sampleStore;
@@ -127,6 +135,7 @@ public class HFCAClientIT {
         sampleStoreFile.deleteOnExit();
 
         client = HFCAClient.createNewInstance(
+                TEST_WITH_INTEGRATION_ORG_CA,
                 testConfig.getIntegrationTestsSampleOrg(TEST_WITH_INTEGRATION_ORG).getCALocation(),
                 testConfig.getIntegrationTestsSampleOrg(TEST_WITH_INTEGRATION_ORG).getCAProperties());
         client.setCryptoSuite(crypto);
@@ -147,7 +156,7 @@ public class HFCAClientIT {
             return; // needs v1.1
         }
 
-        SampleUser user = new SampleUser("mrAttributes", TEST_ADMIN_ORG, sampleStore);
+        SampleUser user = new SampleUser("mrAttributes", TEST_ADMIN_ORG, sampleStore, crypto);
 
         RegistrationRequest rr = new RegistrationRequest(user.getName(), TEST_USER1_AFFILIATION);
         String password = "mrAttributespassword";
@@ -189,7 +198,7 @@ public class HFCAClientIT {
             return; // needs v1.1
         }
 
-        SampleUser user = new SampleUser("mrAttributesDefault", TEST_ADMIN_ORG, sampleStore);
+        SampleUser user = new SampleUser("mrAttributesDefault", TEST_ADMIN_ORG, sampleStore, crypto);
 
         RegistrationRequest rr = new RegistrationRequest(user.getName(), TEST_USER1_AFFILIATION);
         String password = "mrAttributespassword";
@@ -225,7 +234,7 @@ public class HFCAClientIT {
      */
     @Test
     public void testRegisterAttributesNONE() throws Exception {
-        SampleUser user = new SampleUser("mrAttributesNone", TEST_ADMIN_ORG, sampleStore);
+        SampleUser user = new SampleUser("mrAttributesNone", TEST_ADMIN_ORG, sampleStore, crypto);
 
         RegistrationRequest rr = new RegistrationRequest(user.getName(), TEST_USER1_AFFILIATION);
         String password = "mrAttributespassword";
@@ -590,7 +599,7 @@ public class HFCAClientIT {
         }
 
         HFCAIdentity ident = getIdentityReq("testuser1", HFCAClient.HFCA_TYPE_PEER);
-        ident.create(admin);
+        createSuccessfulHCAIdentity(ident, admin);
 
         HFCAIdentity identGet = client.newHFCAIdentity(ident.getEnrollmentId());
         identGet.read(admin);
@@ -637,7 +646,7 @@ public class HFCAClientIT {
         }
 
         HFCAIdentity ident = getIdentityReq("testuser2", HFCAClient.HFCA_TYPE_CLIENT);
-        ident.create(admin);
+        createSuccessfulHCAIdentity(ident, admin);
 
         Collection<HFCAIdentity> foundIdentities = client.getHFCAIdentities(admin);
         String[] expectedIdenities = new String[] {"testuser2", "admin"};
@@ -666,7 +675,7 @@ public class HFCAClientIT {
         }
 
         HFCAIdentity ident = getIdentityReq("testuser3", HFCAClient.HFCA_TYPE_ORDERER);
-        ident.create(admin);
+        createSuccessfulHCAIdentity(ident, admin);
         assertEquals("Incorrect response for type", "orderer", ident.getType());
         assertNotEquals("Incorrect value for max enrollments", ident.getMaxEnrollments(), new Integer(5));
 
@@ -690,11 +699,11 @@ public class HFCAClientIT {
         thrown.expect(IdentityException.class);
         thrown.expectMessage("Failed to get User");
 
-        SampleUser user = new SampleUser("testuser4", TEST_ADMIN_ORG, sampleStore);
+        SampleUser user = new SampleUser("testuser4", TEST_ADMIN_ORG, sampleStore, client.getCryptoSuite());
 
         HFCAIdentity ident = client.newHFCAIdentity(user.getName());
 
-        ident.create(admin);
+        createSuccessfulHCAIdentity(ident, admin);
         ident.delete(admin);
 
         ident.read(admin);
@@ -732,7 +741,7 @@ public class HFCAClientIT {
 
         HFCAIdentity ident = client.newHFCAIdentity("deletedUser2");
 
-        ident.create(admin);
+        createSuccessfulHCAIdentity(ident, admin);
         ident.delete(admin);
 
         ident.delete(admin);
@@ -747,7 +756,7 @@ public class HFCAClientIT {
         }
 
         thrown.expectMessage("Identity removal is disabled");
-        SampleUser user = new SampleUser("testuser5", "org2", sampleStore);
+        SampleUser user = new SampleUser("testuser5", "org2", sampleStore, client.getCryptoSuite());
 
         HFCAClient client2 = HFCAClient.createNewInstance(
                 testConfig.getIntegrationTestsSampleOrg(TEST_WITH_INTEGRATION_ORG2).getCALocation(),
@@ -762,7 +771,7 @@ public class HFCAClientIT {
 
         HFCAIdentity ident = client2.newHFCAIdentity(user.getName());
 
-        ident.create(admin2);
+        createSuccessfulHCAIdentity(ident, admin2);
         ident.delete(admin2);
     }
 
@@ -796,7 +805,7 @@ public class HFCAClientIT {
         int found = 0;
         for (HFCAAffiliation aff : resp.getChildren()) {
             for (Iterator<String> iter = expectedFirstLevelAffiliations.iterator(); iter.hasNext();
-                    ) {
+            ) {
                 String element = iter.next();
                 if (aff.getName().equals(element)) {
                     iter.remove();
@@ -852,21 +861,21 @@ public class HFCAClientIT {
 
         HFCAIdentity ident = client.newHFCAIdentity("testuser_org4");
         ident.setAffiliation(aff.getName());
-        ident.create(admin);
+        createSuccessfulHCAIdentity(ident, admin);
 
         HFCAAffiliation aff2 = client.newHFCAAffiliation("org4.dept1");
         aff2.create(admin);
 
         HFCAIdentity ident2 = client.newHFCAIdentity("testuser_org4.dept1");
         ident2.setAffiliation("org4.dept1");
-        ident2.create(admin);
+        createSuccessfulHCAIdentity(ident2, admin);
 
         HFCAAffiliation aff3 = client.newHFCAAffiliation("org4.dept1.team1");
         aff3.create(admin);
 
         HFCAIdentity ident3 = client.newHFCAIdentity("testuser_org4.dept1.team1");
         ident3.setAffiliation("org4.dept1.team1");
-        ident3.create(admin);
+        createSuccessfulHCAIdentity(ident3, admin);
 
         aff.setUpdateName("org5");
         // Set force option to true, since their identities associated with affiliations
@@ -943,11 +952,25 @@ public class HFCAClientIT {
 
         HFCAIdentity ident = getIdentityReq("testorg1dept1", "client");
         ident.setAffiliation(aff.getName());
-        ident.create(admin);
+        createSuccessfulHCAIdentity(ident, admin);
 
         aff.setUpdateName("org1.dept2");
         HFCAAffiliationResp resp = aff.update(admin);
         assertEquals("Incorrect status code", new Integer(400), new Integer(resp.getStatusCode()));
+    }
+
+    private static int createSuccessfulHCAIdentity(HFCAIdentity ident, User user) throws InvalidArgumentException, IdentityException {
+
+        int rc = ident.create(user);
+        assertTrue(rc < 400);
+        assertNotNull(ident.getSecret());
+        assertFalse(ident.getSecret().isEmpty());
+        assertNotNull(ident.getEnrollmentId());
+        assertFalse(ident.getEnrollmentId().isEmpty());
+        assertNotNull(ident.getType());
+        assertFalse(ident.getType().isEmpty());
+
+        return rc;
     }
 
     // Tests deleting an affiliation
@@ -965,14 +988,14 @@ public class HFCAClientIT {
 
         HFCAIdentity ident = client.newHFCAIdentity("testuser_org6");
         ident.setAffiliation("org6");
-        ident.create(admin);
+        createSuccessfulHCAIdentity(ident, admin);
 
         HFCAAffiliation aff2 = client.newHFCAAffiliation("org6.dept1");
         aff2.create(admin);
 
         HFCAIdentity ident2 = client.newHFCAIdentity("testuser_org6.dept1");
         ident2.setAffiliation("org6.dept1");
-        ident2.create(admin);
+        createSuccessfulHCAIdentity(ident2, admin);
 
         HFCAAffiliationResp resp = aff.delete(admin, true);
         int idCount = 0;
@@ -1043,7 +1066,7 @@ public class HFCAClientIT {
 
         HFCAIdentity ident = getIdentityReq("testorg1dept3", "client");
         ident.setAffiliation("org1.dept3");
-        ident.create(admin);
+        createSuccessfulHCAIdentity(ident, admin);
 
         HFCAAffiliationResp resp = aff.delete(admin);
         assertEquals("Incorrect status code", new Integer(401), new Integer(resp.getStatusCode()));
@@ -1084,7 +1107,7 @@ public class HFCAClientIT {
             assertNull(info.getVersion());
         }
 
-        if (!testConfig.isRunningAgainstFabric10()) {
+        if (testConfig.isFabricVersionAtOrAfter("1.3")) {
             HFCAInfo info = client.info();
             assertNotNull("client.info returned null.", info);
             String version = info.getVersion();
@@ -1092,6 +1115,157 @@ public class HFCAClientIT {
             assertTrue(format("Version '%s' didn't match expected pattern", version), version.matches("^\\d+\\.\\d+\\.\\d+($|-.*)"));
         }
 
+    }
+
+    // Tests getting certificates
+    @Test
+    public void testGetCertificates() throws Exception {
+
+        if (testConfig.isRunningAgainstFabric10()) {
+            return;
+        }
+
+        HFCACertificateRequest certReq = client.newHFCACertificateRequest();
+
+        SampleUser admin2 = sampleStore.getMember("admin2", "org2.department1");
+        RegistrationRequest rr = new RegistrationRequest(admin2.getName(), "org2.department1");
+        String password = "password";
+        rr.setSecret(password);
+        rr.addAttribute(new Attribute("hf.Registrar.Roles", "client,peer,user"));
+
+        client.register(rr, admin);
+        admin2.setEnrollment(client.enroll(admin2.getName(), password));
+
+        rr = new RegistrationRequest("testUser", "org2.department1");
+        rr.setSecret(password);
+        client.register(rr, admin);
+        Enrollment enroll = client.enroll("testUser", password);
+
+        // Get all certificates that 'admin2' is allowed to see because no attributes are set
+        // in the certificate request. This returns 2 certificates, one certificate for the caller
+        // itself 'admin2' and the other certificate for 'testuser2'. These are the only two users
+        // that fall under the caller's affiliation of 'org2.department1'.
+        HFCACertificateResponse resp = client.getHFCACertificates(admin2, certReq);
+        assertEquals(2, resp.getCerts().size());
+        assertTrue(resultContains(resp.getCerts(), new String[] {"admin", "testUser"}));
+
+        // Get certificate for a specific enrollment id
+        certReq.setEnrollmentID("admin2");
+        resp = client.getHFCACertificates(admin, certReq);
+        assertEquals(1, resp.getCerts().size());
+        assertTrue(resultContains(resp.getCerts(), new String[] {"admin"}));
+
+        // Get certificate for a specific serial number
+        certReq = client.newHFCACertificateRequest();
+        X509Certificate cert = getCert(enroll.getCert().getBytes());
+        String serial = cert.getSerialNumber().toString(16);
+        certReq.setSerial(serial);
+        resp = client.getHFCACertificates(admin, certReq);
+        assertEquals(1, resp.getCerts().size());
+        assertTrue(resultContains(resp.getCerts(), new String[] {"testUser"}));
+
+        // Get certificate for a specific AKI
+        certReq = client.newHFCACertificateRequest();
+        String oid = Extension.authorityKeyIdentifier.getId();
+        byte[] extensionValue = cert.getExtensionValue(oid);
+        ASN1OctetString aki0c = ASN1OctetString.getInstance(extensionValue);
+        AuthorityKeyIdentifier aki = AuthorityKeyIdentifier.getInstance(aki0c.getOctets());
+        String aki2 = DatatypeConverter.printHexBinary(aki.getKeyIdentifier());
+        certReq.setAki(aki2);
+        resp = client.getHFCACertificates(admin2, certReq);
+        assertEquals(2, resp.getCerts().size());
+
+        SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd");
+
+        // Get certificates that expired before a specific date
+        // In this case, using a really old date should return 0 certificates
+        certReq = client.newHFCACertificateRequest();
+        certReq.setExpiredEnd(formatter.parse("2014-30-31"));
+        resp = client.getHFCACertificates(admin, certReq);
+        assertEquals(0, resp.getCerts().size());
+
+        // Get certificates that expired before a specific date
+        // In this case, using a date far into the future should return all certificates
+        certReq = client.newHFCACertificateRequest();
+        Calendar cal = Calendar.getInstance();
+        Date date = new Date();
+        cal.setTime(date);
+        cal.add(Calendar.YEAR, 20);
+        date = cal.getTime();
+        certReq.setExpiredEnd(date);
+        resp = client.getHFCACertificates(admin2, certReq);
+        assertEquals(2, resp.getCerts().size());
+        assertTrue(resultContains(resp.getCerts(), new String[] {"admin2", "testUser"}));
+
+        // Get certificates that expired after specific date
+        // In this case, using a really old date should return all certificates that the caller is
+        // allowed to see because they all have a future expiration date
+        certReq = client.newHFCACertificateRequest();
+        certReq.setExpiredStart(formatter.parse("2014-03-31"));
+        resp = client.getHFCACertificates(admin2, certReq);
+        assertEquals(2, resp.getCerts().size());
+
+        // Get certificates that expired after specified date
+        // In this case, using a date far into the future should return zero certificates
+        certReq = client.newHFCACertificateRequest();
+        certReq.setExpiredStart(date);
+        resp = client.getHFCACertificates(admin, certReq);
+        assertEquals(0, resp.getCerts().size());
+
+        client.revoke(admin, "testUser", "baduser");
+
+        // Get certificates that were revoked after specific date
+        certReq = client.newHFCACertificateRequest();
+        certReq.setRevokedStart(formatter.parse("2014-03-31"));
+        resp = client.getHFCACertificates(admin2, certReq);
+        assertEquals(1, resp.getCerts().size());
+
+        certReq = client.newHFCACertificateRequest();
+        certReq.setRevokedEnd(formatter.parse("2014-03-31"));
+        resp = client.getHFCACertificates(admin2, certReq);
+        assertEquals(0, resp.getCerts().size());
+
+        certReq = client.newHFCACertificateRequest();
+        certReq.setRevoked(false);
+        resp = client.getHFCACertificates(admin2, certReq);
+        assertEquals(1, resp.getCerts().size());
+        assertTrue(resultContains(resp.getCerts(), new String[] {"admin2"}));
+        assertFalse(resultContains(resp.getCerts(), new String[] {"testUser"}));
+
+        certReq = client.newHFCACertificateRequest();
+        certReq.setRevoked(true);
+        resp = client.getHFCACertificates(admin2, certReq);
+        assertTrue(resultContains(resp.getCerts(), new String[] {"admin2", "testUser"}));
+        assertEquals(2, resp.getCerts().size());
+
+        certReq = client.newHFCACertificateRequest();
+        certReq.setExpired(false);
+        resp = client.getHFCACertificates(admin2, certReq);
+        assertEquals(2, resp.getCerts().size());
+    }
+
+    private boolean resultContains(Collection<HFCACredential> creds, String[] names) {
+        int numFound = 0;
+        for (HFCACredential cred : creds) {
+            for (int i = 0; i < names.length; i++) {
+                HFCAX509Certificate cert = (HFCAX509Certificate) cred;
+                if (cert.getX509().getSubjectDN().toString().contains(names[i])) {
+                    numFound++;
+                    break;
+                }
+            }
+        }
+        if (numFound == names.length) {
+            return true;
+        }
+        return false;
+    }
+
+    private X509Certificate getCert(byte[] certBytes) throws CertificateException {
+        BufferedInputStream pem = new BufferedInputStream(new ByteArrayInputStream(certBytes));
+        CertificateFactory certFactory = CertificateFactory.getInstance("X509");
+        X509Certificate certificate = (X509Certificate) certFactory.generateCertificate(pem);
+        return certificate;
     }
 
     @Test
@@ -1158,6 +1332,25 @@ public class HFCAClientIT {
         clientWithName.setCryptoSuite(cryptoSuite);
 
         clientWithName.enroll(admin.getName(), TEST_ADMIN_PW);
+    }
+
+    // Tests getting an Idemix credential using an x509 enrollment credential
+    @Test
+    public void testGetIdemixCred() throws Exception {
+        if (testConfig.isFabricVersionBefore("1.3")) {
+            return; // needs v1.3
+        }
+
+        SampleUser user = getTestUser(TEST_ADMIN_ORG);
+        RegistrationRequest rr = new RegistrationRequest(user.getName(), TEST_USER1_AFFILIATION);
+        String password = "password";
+        rr.setSecret(password);
+        user.setEnrollmentSecret(client.register(rr, admin));
+        user.setEnrollment(client.enroll(user.getName(), user.getEnrollmentSecret()));
+
+        Enrollment enrollment = client.idemixEnroll(user.getEnrollment(), "idemixMsp");
+        assertNotNull(enrollment);
+        assertTrue(enrollment instanceof IdemixEnrollment);
     }
 
     // revoke2: revoke(User revoker, String revokee, String reason)
@@ -1252,6 +1445,7 @@ public class HFCAClientIT {
 
         mockClient.setHttpPostResponse("{\"success\":true}");
         mockClient.reenroll(user);
+        out("That's all folks!");
     }
 
     @Ignore

@@ -20,6 +20,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -83,14 +85,32 @@ public class Config {
     public static final String CONN_SSL_PROVIDER = "org.hyperledger.fabric.sdk.connections.ssl.sslProvider";
     public static final String CONN_SSL_NEGTYPE = "org.hyperledger.fabric.sdk.connections.ssl.negotiationType";
 
+    /**
+     * Default HFClient thread executor settings.
+     */
+
+    public static final String CLIENT_THREAD_EXECUTOR_COREPOOLSIZE = "org.hyperledger.fabric.sdk.client.thread_executor_corepoolsize";
+    public static final String CLIENT_THREAD_EXECUTOR_MAXIMUMPOOLSIZE = "org.hyperledger.fabric.sdk.client.thread_executor_maximumpoolsize";
+    public static final String CLIENT_THREAD_EXECUTOR_KEEPALIVETIME = "org.hyperledger.fabric.sdk.client.thread_executor_keepalivetime";
+    public static final String CLIENT_THREAD_EXECUTOR_KEEPALIVETIMEUNIT = "org.hyperledger.fabric.sdk.client.thread_executor_keepalivetimeunit";
 
     /**
      * Miscellaneous settings
      **/
     public static final String PROPOSAL_CONSISTENCY_VALIDATION = "org.hyperledger.fabric.sdk.proposal.consistency_validation";
 
+    public static final String SERVICE_DISCOVER_FREQ_SECONDS = "org.hyperledger.fabric.sdk.service_discovery.frequency_sec";
+    public static final String SERVICE_DISCOVER_WAIT_TIME = "org.hyperledger.fabric.sdk.service_discovery.discovery_wait_time";
+    public static final String SERVICE_DISCOVER_AS_LOCALHOST = "org.hyperledger.fabric.sdk.service_discovery.as_localhost";
+
     private static Config config;
     private static final Properties sdkProperties = new Properties();
+    private static final AtomicLong count = new AtomicLong(0);
+
+    //Provides a unique id for logging to identify a specific instance.
+    public String getNextID() {
+        return "" + count.incrementAndGet();
+    }
 
     private Config() {
         File loadFile;
@@ -113,7 +133,7 @@ public class Config {
             /**
              * Timeout settings
              **/
-            defaultProperty(PROPOSAL_WAIT_TIME, "20000");
+            defaultProperty(PROPOSAL_WAIT_TIME, "120000");
             defaultProperty(CHANNEL_CONFIG_WAIT_TIME, "15000");
             defaultProperty(ORDERER_RETRY_WAIT_TIME, "200");
             defaultProperty(ORDERER_WAIT_TIME, "10000");
@@ -149,6 +169,15 @@ public class Config {
             defaultProperty(CONN_SSL_NEGTYPE, "TLS");
 
             /**
+             * Default HFClient thread executor settings.
+             */
+
+            defaultProperty(CLIENT_THREAD_EXECUTOR_COREPOOLSIZE, "0");
+            defaultProperty(CLIENT_THREAD_EXECUTOR_MAXIMUMPOOLSIZE, "" + Integer.MAX_VALUE);
+            defaultProperty(CLIENT_THREAD_EXECUTOR_KEEPALIVETIME, "" + "60");
+            defaultProperty(CLIENT_THREAD_EXECUTOR_KEEPALIVETIMEUNIT, "SECONDS");
+
+            /**
              * Logging settings
              **/
             defaultProperty(MAX_LOG_STRING_LENGTH, "64");
@@ -161,6 +190,10 @@ public class Config {
             defaultProperty(PROPOSAL_CONSISTENCY_VALIDATION, "true");
             defaultProperty(EVENTHUB_RECONNECTION_WARNING_RATE, "50");
             defaultProperty(PEER_EVENT_RECONNECTION_WARNING_RATE, "50");
+
+            defaultProperty(SERVICE_DISCOVER_FREQ_SECONDS, "120");
+            defaultProperty(SERVICE_DISCOVER_WAIT_TIME, "5000");
+            defaultProperty(SERVICE_DISCOVER_AS_LOCALHOST, "false");
 
             final String inLogLevel = sdkProperties.getProperty(LOGGERLEVEL);
 
@@ -307,7 +340,6 @@ public class Config {
 
     }
 
-
     private Map<Integer, String> curveMapping = null;
 
     /**
@@ -424,6 +456,28 @@ public class Config {
         return Long.parseLong(getProperty(PEER_EVENT_RECONNECTION_WARNING_RATE));
     }
 
+    /**
+     * How often serviced discovery is preformed in seconds.
+     *
+     * @return
+     */
+    public int getServiceDiscoveryFreqSeconds() {
+        return Integer.parseInt(getProperty(SERVICE_DISCOVER_FREQ_SECONDS));
+    }
+
+    /**
+     * Time to wait for service discovery to complete.
+     *
+     * @return
+     */
+    public int getServiceDiscoveryWaitTime() {
+        return Integer.parseInt(getProperty(SERVICE_DISCOVER_WAIT_TIME));
+    }
+
+    public boolean discoverAsLocalhost() {
+        return Boolean.parseBoolean(getProperty(SERVICE_DISCOVER_AS_LOCALHOST));
+    }
+
     public long getEventHubConnectionWaitTime() {
         return Long.parseLong(getProperty(EVENTHUB_CONNECTION_WAIT_TIME));
     }
@@ -505,4 +559,47 @@ public class Config {
     public long getTransactionListenerCleanUpTimeout() {
         return Long.parseLong(getProperty(TRANSACTION_CLEANUP_UP_TIMEOUT_WAIT_TIME));
     }
+
+    /**
+     * The number of threads to keep in the pool, even if they are idle, unless {@code allowCoreThreadTimeOut} is set
+     *
+     * @return The number of threads to keep in the pool, even if they are idle, unless {@code allowCoreThreadTimeOut} is set
+     */
+
+    public int getClientThreadExecutorCorePoolSize() {
+        return Integer.parseInt(getProperty(CLIENT_THREAD_EXECUTOR_COREPOOLSIZE));
+    }
+
+    /**
+     * maximumPoolSize the maximum number of threads to allow in the pool
+     *
+     * @return maximumPoolSize the maximum number of threads to allow in the pool
+     */
+    public int getClientThreadExecutorMaxiumPoolSize() {
+        return Integer.parseInt(getProperty(CLIENT_THREAD_EXECUTOR_MAXIMUMPOOLSIZE));
+    }
+
+    /**
+     * keepAliveTime when the number of threads is greater than
+     * the core, this is the maximum time that excess idle threads
+     * will wait for new tasks before terminating.
+     *
+     * @return The keep alive time.
+     */
+
+    public long getClientThreadExecutorKeepAliveTime() {
+        return Long.parseLong(getProperty(CLIENT_THREAD_EXECUTOR_KEEPALIVETIME));
+    }
+
+    /**
+     * the time unit for the argument
+     *
+     * @return
+     */
+
+    public TimeUnit getClientThreadExecutorKeepAliveTimeUnit() {
+
+        return TimeUnit.valueOf(getProperty(CLIENT_THREAD_EXECUTOR_KEEPALIVETIMEUNIT));
+    }
+
 }

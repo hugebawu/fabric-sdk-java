@@ -25,11 +25,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
+import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 import java.util.Properties;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -330,7 +333,7 @@ public final class Utils {
                 throw new RuntimeException(format("Invalid protocol expected grpc or grpcs and found %s.", protocol));
             }
         } else {
-            throw new RuntimeException("URL must be of the format protocol://host:port");
+            throw new RuntimeException("URL must be of the format protocol://host:port. Found: '" + url + "'");
         }
 
         // TODO: allow all possible formats of the URL

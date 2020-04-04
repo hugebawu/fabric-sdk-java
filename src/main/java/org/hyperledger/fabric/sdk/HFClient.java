@@ -28,6 +28,10 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -39,6 +43,7 @@ import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
 import org.hyperledger.fabric.sdk.exception.NetworkConfigurationException;
 import org.hyperledger.fabric.sdk.exception.ProposalException;
 import org.hyperledger.fabric.sdk.exception.TransactionException;
+import org.hyperledger.fabric.sdk.helper.Config;
 import org.hyperledger.fabric.sdk.helper.Utils;
 import org.hyperledger.fabric.sdk.security.CryptoSuite;
 
@@ -46,8 +51,10 @@ import static java.lang.String.format;
 import static org.hyperledger.fabric.sdk.User.userContextCheck;
 
 public class HFClient {
+    private static final Config config = Config.getConfig(); // never remove this! config needs to load first.
 
     private CryptoSuite cryptoSuite;
+    protected final ExecutorService executorService;
 
     static {
 
@@ -58,12 +65,6 @@ public class HFClient {
 
         }
     }
-
-    private final ExecutorService executorService = Executors.newCachedThreadPool(r -> {
-        Thread t = Executors.defaultThreadFactory().newThread(r);
-        t.setDaemon(true);
-        return t;
-    });
 
     ExecutorService getExecutorService() {
         return executorService;
@@ -79,7 +80,23 @@ public class HFClient {
 
     private User userContext;
 
+    protected final ThreadFactory threadFactory = Executors.defaultThreadFactory();
+
+    private static final int CLIENT_THREAD_EXECUTOR_COREPOOLSIZE = config.getClientThreadExecutorCorePoolSize();
+    private static final int CLIENT_THREAD_EXECUTOR_MAXIMUMPOOLSIZE = config.getClientThreadExecutorMaxiumPoolSize();
+    private static final long CLIENT_THREAD_EXECUTOR_KEEPALIVETIME = config.getClientThreadExecutorKeepAliveTime();
+    private static final TimeUnit CLIENT_THREAD_EXECUTOR_KEEPALIVETIMEUNIT = config.getClientThreadExecutorKeepAliveTimeUnit();
+
     private HFClient() {
+
+        executorService = new ThreadPoolExecutor(CLIENT_THREAD_EXECUTOR_COREPOOLSIZE, CLIENT_THREAD_EXECUTOR_MAXIMUMPOOLSIZE,
+                CLIENT_THREAD_EXECUTOR_KEEPALIVETIME, CLIENT_THREAD_EXECUTOR_KEEPALIVETIMEUNIT,
+                new SynchronousQueue<Runnable>(),
+                r -> {
+                    Thread t = threadFactory.newThread(r);
+                    t.setDaemon(true);
+                    return t;
+                });
 
     }
 
@@ -120,7 +137,7 @@ public class HFClient {
      * Configures a channel based on information loaded from a Network Config file.
      * Note that it is up to the caller to initialize the returned channel.
      *
-     * @param channelName The name of the channel to be configured
+     * @param channelName   The name of the channel to be configured
      * @param networkConfig The network configuration to use to configure the channel
      * @return The configured channel, or null if the channel is not defined in the configuration
      * @throws InvalidArgumentException
@@ -143,7 +160,6 @@ public class HFClient {
 
         return networkConfig.loadChannel(this, channelName);
     }
-
 
     /**
      * newChannel - already configured channel.
@@ -188,7 +204,7 @@ public class HFClient {
      */
 
     public Channel newChannel(String name, Orderer orderer, ChannelConfiguration channelConfiguration,
-            byte[]... channelConfigurationSignatures) throws TransactionException, InvalidArgumentException {
+                              byte[]... channelConfigurationSignatures) throws TransactionException, InvalidArgumentException {
 
         clientCheck();
         if (Utils.isNullOrEmpty(name)) {
@@ -284,6 +300,7 @@ public class HFClient {
      *                   Supported properties
      *                   <ul>
      *                   <li>pemFile - File location for x509 pem certificate for SSL.</li>
+     *                   <li>pemBytes - byte array for x509 pem certificates for SSL</li>
      *                   <li>trustServerCertificate - boolen(true/false) override CN to match pemFile certificate -- for development only.
      *                   If the pemFile has the target server's certificate (instead of a CA Root certificate),
      *                   instruct the TLS client to trust the CN value of the certificate in the pemFile,
@@ -303,6 +320,9 @@ public class HFClient {
      *                   </li>
      *                   <li>
      *                   peerEventRegistrationWaitTime - Time in milliseconds to wait for peer eventing service registration.
+     *                   </li>
+     *                   <li>
+     *                   org.hyperledger.fabric.sdk.peer.organization_mspid {@link Peer#PEER_ORGANIZATION_MSPID_PROPERTY} - Associates peer to an organization by its mspid.
      *                   </li>
      *                   <li>
      *                   grpc.NettyChannelBuilderOption.&lt;methodName&gt;  where methodName is any method on
@@ -414,12 +434,13 @@ public class HFClient {
     /**
      * Create a new Eventhub.
      *
-     * @param name       name of Orderer.
+     * @param name       name of Eventhub.
      * @param grpcURL    url location of orderer grpc or grpcs protocol.
      * @param properties <p>
      *                   Supported properties
      *                   <ul>
      *                   <li>pemFile - File location for x509 pem certificate for SSL.</li>
+     *                   <li>pemBytes - byte array for x509 pem certificates for SSL</li>
      *                   <li>trustServerCertificate - boolean(true/false) override CN to match pemFile certificate -- for development only.
      *                   If the pemFile has the target server's certificate (instead of a CA Root certificate),
      *                   instruct the TLS client to trust the CN value of the certificate in the pemFile,
@@ -487,6 +508,7 @@ public class HFClient {
      *                   Supported properties
      *                   <ul>
      *                   <li>pemFile - File location for x509 pem certificate for SSL.</li>
+     *                   <li>pemBytes - byte array for x509 pem certificates for SSL</li>
      *                   <li>trustServerCertificate - boolean(true/false) override CN to match pemFile certificate -- for development only.
      *                   If the pemFile has the target server's certificate (instead of a CA Root certificate),
      *                   instruct the TLS client to trust the CN value of the certificate in the pemFile,
@@ -503,6 +525,9 @@ public class HFClient {
      *                   If the pemFile does not represent the server certificate, use this property to specify the URI authority
      *                   (a.k.a hostname) expected in the target server's certificate. This is required to get past default server
      *                   hostname verifications during TLS handshake.
+     *                   </li>
+     *                   <li>
+     *                   org.hyperledger.fabric.sdk.orderer.organization_mspid {@link Orderer#ORDERER_ORGANIZATION_MSPID_PROPERTY} - Associates orderer to an organization by its mspid.
      *                   </li>
      *                   <li>
      *                   grpc.NettyChannelBuilderOption.&lt;methodName&gt;  where methodName is any method on
@@ -524,10 +549,10 @@ public class HFClient {
     }
 
     /**
-     * Query the channels for peers
+     * Query the joined channels for peers
      *
      * @param peer the peer to query
-     * @return A set of strings with the peer names.
+     * @return A set of strings with the names of the channels the peer has joined.
      * @throws InvalidArgumentException
      * @throws ProposalException
      */
@@ -617,7 +642,7 @@ public class HFClient {
      */
 
     public byte[] getUpdateChannelConfigurationSignature(UpdateChannelConfiguration updateChannelConfiguration,
-            User signer) throws InvalidArgumentException {
+                                                         User signer) throws InvalidArgumentException {
 
         clientCheck();
 
@@ -637,17 +662,15 @@ public class HFClient {
      */
 
     public Collection<ProposalResponse> sendInstallProposal(InstallProposalRequest installProposalRequest,
-            Collection<Peer> peers) throws ProposalException, InvalidArgumentException {
+                                                            Collection<Peer> peers) throws ProposalException, InvalidArgumentException {
 
         clientCheck();
 
-        installProposalRequest.setSubmitted();
         Channel systemChannel = Channel.newSystemChannel(this);
 
         return systemChannel.sendInstallProposal(installProposalRequest, peers);
 
     }
-
 
     private void clientCheck() throws InvalidArgumentException {
 
