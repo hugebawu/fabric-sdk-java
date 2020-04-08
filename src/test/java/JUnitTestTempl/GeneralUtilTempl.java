@@ -1,4 +1,4 @@
-package org.hyperledger.fabric.sdkintegration;
+package JUnitTestTempl;
 
 /*
 * The general utility class that needs to tested. 

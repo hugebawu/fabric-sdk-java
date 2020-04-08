@@ -1,4 +1,4 @@
-package org.hyperledger.fabric.sdkintegration;
+package JUnitTestTempl;
 
 /*
 * This class is for Parametric test 

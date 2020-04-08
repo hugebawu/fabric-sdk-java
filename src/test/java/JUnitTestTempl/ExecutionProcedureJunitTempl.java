@@ -1,4 +1,4 @@
-package org.hyperledger.fabric.sdkintegration;
+package JUnitTestTempl;
 
 import org.junit.After;
 import org.junit.AfterClass;
