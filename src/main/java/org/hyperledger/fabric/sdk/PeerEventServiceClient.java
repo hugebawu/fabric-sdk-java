@@ -54,11 +54,11 @@ class PeerEventServiceClient {
     private static final long PEER_EVENT_REGISTRATION_WAIT_TIME = config.getPeerEventRegistrationWaitTime();
     private static final long PEER_EVENT_RECONNECTION_WARNING_RATE = config.getPeerEventReconnectionWarningRate();
     private static final Log logger = LogFactory.getLog(PeerEventServiceClient.class);
-    private String channelName = null;
+    private final String channelName;
     private final ManagedChannelBuilder channelBuilder;
     private final String name;
     private final String url;
-    private long peerEventRegistrationWaitTimeMilliSecs = PEER_EVENT_REGISTRATION_WAIT_TIME;
+    private final long peerEventRegistrationWaitTimeMilliSecs;
 
     private final PeerOptions peerOptions;
     private final boolean filterBlock;
@@ -79,30 +79,14 @@ class PeerEventServiceClient {
         this.channelBuilder = endpoint.getChannelBuilder();
         this.filterBlock = peerOptions.isRegisterEventsForFilteredBlocks();
         this.peer = peer;
-        this.peerOptions = peerOptions;
         name = peer.getName();
         url = peer.getUrl();
-
-        if (peer.isShutdown()) {
-            logger.debug("PeerEventServiceClient not starting peer has shutdown.");
-            shutdown = true;
-            toString = "PeerEventServiceClient{" + "id: " + config.getNextID() + ", channel: null" + ", peerName: " + name + ", url: " + url + "}";
-            return;
-        }
-        final Channel channel = peer.getChannel();
-        if (channel == null) {
-            logger.debug("Peer no longer associated with a channel not connecting.");
-            shutdown = true;
-            toString = "PeerEventServiceClient{" + "id: " + config.getNextID() + ", channel: null" + ", peerName: " + name + ", url: " + url + "}";
-            return;
-        }
-
-        channelName = channel.getName();
+        channelName = peer.getChannel().getName();
         toString = "PeerEventServiceClient{" + "id: " + config.getNextID() + ", channel: " + channelName + ", peerName: " + name + ", url: " + url + "}";
-
+        this.peerOptions = peerOptions;
         clientTLSCertificateDigest = endpoint.getClientTLSCertificateDigest();
 
-        this.channelEventQue = channel.getChannelEventQue();
+        this.channelEventQue = peer.getChannel().getChannelEventQue();
 
         if (null == properties) {
 
@@ -395,12 +379,8 @@ class PeerEventServiceClient {
 
     //=========================================================
     // Peer eventing
-    private void peerVent(TransactionContext transactionContext) throws TransactionException {
+    void peerVent(TransactionContext transactionContext) throws TransactionException {
         logger.trace(toString() + "peerVent  transaction: " + transactionContext);
-        if (shutdown) { // check aagin
-            logger.debug("peerVent not starting, shutting down.");
-            return;
-        }
 
         final Envelope envelope;
         try {

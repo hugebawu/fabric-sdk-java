@@ -322,9 +322,6 @@ public class HFClient {
      *                   peerEventRegistrationWaitTime - Time in milliseconds to wait for peer eventing service registration.
      *                   </li>
      *                   <li>
-     *                   org.hyperledger.fabric.sdk.peer.organization_mspid {@link Peer#PEER_ORGANIZATION_MSPID_PROPERTY} - Associates peer to an organization by its mspid.
-     *                   </li>
-     *                   <li>
      *                   grpc.NettyChannelBuilderOption.&lt;methodName&gt;  where methodName is any method on
      *                   grpc ManagedChannelBuilder.  If more than one argument to the method is needed then the
      *                   parameters need to be supplied in an array of Objects.
@@ -527,9 +524,6 @@ public class HFClient {
      *                   hostname verifications during TLS handshake.
      *                   </li>
      *                   <li>
-     *                   org.hyperledger.fabric.sdk.orderer.organization_mspid {@link Orderer#ORDERER_ORGANIZATION_MSPID_PROPERTY} - Associates orderer to an organization by its mspid.
-     *                   </li>
-     *                   <li>
      *                   grpc.NettyChannelBuilderOption.&lt;methodName&gt;  where methodName is any method on
      *                   grpc ManagedChannelBuilder.  If more than one argument to the method is needed then the
      *                   parameters need to be supplied in an array of Objects.
@@ -666,6 +660,7 @@ public class HFClient {
 
         clientCheck();
 
+        installProposalRequest.setSubmitted();
         Channel systemChannel = Channel.newSystemChannel(this);
 
         return systemChannel.sendInstallProposal(installProposalRequest, peers);

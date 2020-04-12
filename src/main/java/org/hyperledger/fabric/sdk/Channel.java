@@ -171,8 +171,6 @@ public class Channel implements Serializable {
     private final Collection<Peer> peers = Collections.synchronizedSet(new HashSet<>());
     private final Map<Peer, PeerOptions> peerOptionsMap = Collections.synchronizedMap(new HashMap<>());
     private transient Map<String, Peer> peerEndpointMap = Collections.synchronizedMap(new HashMap<>());
-    private Map<String, Collection<Peer>> peerMSPIDMap = new HashMap<>();
-    private Map<String, Collection<Orderer>> ordererMSPIDMap = new HashMap<>();
     private final Map<PeerRole, Set<Peer>> peerRoleSetMap = Collections.synchronizedMap(new HashMap<>());
     private transient String chaincodeEventUpgradeListenerHandle;
     private transient String transactionListenerProcessorHandle;
@@ -201,7 +199,6 @@ public class Channel implements Serializable {
     private transient ScheduledExecutorService sweeperExecutorService;
     private transient String blh = null;
     private transient ServiceDiscovery serviceDiscovery;
-    private static final boolean asLocalhost = config.discoverAsLocalhost();
 
     {
         for (Peer.PeerRole peerRole : EnumSet.allOf(PeerRole.class)) {
@@ -211,6 +208,10 @@ public class Channel implements Serializable {
         }
     }
 
+    //    public void clean(){
+//        channelEventQue = null;
+//    }
+//
     private Channel(String name, HFClient hfClient, Orderer orderer, ChannelConfiguration channelConfiguration, byte[][] signers) throws InvalidArgumentException, TransactionException {
         this(name, hfClient, false);
 
@@ -243,7 +244,7 @@ public class Channel implements Serializable {
             final ConfigUpdateEnvelope configUpdateEnv = ConfigUpdateEnvelope.parseFrom(ccPayload.getData());
             ByteString configUpdate = configUpdateEnv.getConfigUpdate();
 
-            sendUpdateChannel(client.getUserContext(), configUpdate.toByteArray(), signers, orderer);
+            sendUpdateChannel(configUpdate.toByteArray(), signers, orderer);
             //         final ConfigUpdateEnvelope.Builder configUpdateEnvBuilder = configUpdateEnv.toBuilder();`
 
             //---------------------------------------
@@ -398,9 +399,8 @@ public class Channel implements Serializable {
     }
 
     /**
-     * Update channel with specified channel configuration.
+     * Update channel with specified channel configuration
      *
-     * <P></P>Note This is not a thread safe operation
      * @param updateChannelConfiguration Updated Channel configuration
      * @param signers                    signers
      * @throws TransactionException
@@ -409,13 +409,12 @@ public class Channel implements Serializable {
 
     public void updateChannelConfiguration(UpdateChannelConfiguration updateChannelConfiguration, byte[]... signers) throws TransactionException, InvalidArgumentException {
 
-        updateChannelConfiguration(client.getUserContext(), updateChannelConfiguration, getRandomOrderer(), signers);
+        updateChannelConfiguration(updateChannelConfiguration, getRandomOrderer(), signers);
 
     }
 
     /**
      * Update channel with specified channel configuration
-     * <P></P>Note This is not a thread safe operation
      *
      * @param updateChannelConfiguration Channel configuration
      * @param signers                    signers
@@ -425,41 +424,24 @@ public class Channel implements Serializable {
      */
 
     public void updateChannelConfiguration(UpdateChannelConfiguration updateChannelConfiguration, Orderer orderer, byte[]... signers) throws TransactionException, InvalidArgumentException {
-        updateChannelConfiguration(client.getUserContext(), updateChannelConfiguration, orderer, signers);
-    }
-
-    /**
-     * Update channel with specified channel configuration
-     *
-     * @param userContext                The specific user to use.
-     * @param updateChannelConfiguration Channel configuration
-     * @param signers                    signers
-     * @param orderer                    The specific orderer to use.
-     * @throws TransactionException
-     * @throws InvalidArgumentException
-     */
-
-    public void updateChannelConfiguration(User userContext, UpdateChannelConfiguration updateChannelConfiguration, Orderer orderer, byte[]... signers) throws TransactionException, InvalidArgumentException {
 
         checkChannelState();
 
         checkOrderer(orderer);
 
-        User.userContextCheck(userContext);
-
         try {
-            final long startLastConfigIndex = getLastConfigIndex(getTransactionContext(userContext), orderer);
+            final long startLastConfigIndex = getLastConfigIndex(orderer);
             logger.trace(format("startLastConfigIndex: %d. Channel config wait time is: %d",
                     startLastConfigIndex, CHANNEL_CONFIG_WAIT_TIME));
 
-            sendUpdateChannel(userContext, updateChannelConfiguration.getUpdateChannelConfigurationAsBytes(), signers, orderer);
+            sendUpdateChannel(updateChannelConfiguration.getUpdateChannelConfigurationAsBytes(), signers, orderer);
 
             long currentLastConfigIndex = -1;
             final long nanoTimeStart = System.nanoTime();
 
             //Try to wait to see the channel got updated but don't fail if we don't see it.
             do {
-                currentLastConfigIndex = getLastConfigIndex(getTransactionContext(userContext), orderer);
+                currentLastConfigIndex = getLastConfigIndex(orderer);
                 if (currentLastConfigIndex == startLastConfigIndex) {
 
                     final long duration = TimeUnit.MILLISECONDS.convert(System.nanoTime() - nanoTimeStart, TimeUnit.NANOSECONDS);
@@ -498,7 +480,7 @@ public class Channel implements Serializable {
 
     }
 
-    private void sendUpdateChannel(User userContext, byte[] configupdate, byte[][] signers, Orderer orderer) throws TransactionException, InvalidArgumentException {
+    private void sendUpdateChannel(byte[] configupdate, byte[][] signers, Orderer orderer) throws TransactionException, InvalidArgumentException {
 
         logger.debug(format("Channel %s sendUpdateChannel", name));
         checkOrderer(orderer);
@@ -511,7 +493,7 @@ public class Channel implements Serializable {
             do {
 
                 //Make sure we have fresh transaction context for each try just to be safe.
-                TransactionContext transactionContext = getTransactionContext(userContext);
+                TransactionContext transactionContext = getTransactionContext();
 
                 ConfigUpdateEnvelope.Builder configUpdateEnvBuilder = ConfigUpdateEnvelope.newBuilder();
 
@@ -668,18 +650,19 @@ public class Channel implements Serializable {
         peers.add(peer);
         peerOptionsMap.put(peer, peerOptions.clone());
         peerEndpointMap.put(peer.getEndpoint(), peer);
-        addPeerMSPIDMap(peer);
 
         if (peerOptions.getPeerRoles().contains(PeerRole.SERVICE_DISCOVERY)) {
 
             final Properties properties = peer.getProperties();
-            if ((properties == null) || properties.isEmpty() || (isNullOrEmpty(properties.getProperty("clientCertFile")) &&
-                    !properties.containsKey("clientCertBytes"))) {
+            if ((properties == null) || (isNullOrEmpty(properties.getProperty("clientCertFile")) &&
+                    isNullOrEmpty(properties.getProperty("clientCertBytes")))) {
                 TLSCertificateBuilder tlsCertificateBuilder = new TLSCertificateBuilder();
                 TLSCertificateKeyPair tlsCertificateKeyPair = tlsCertificateBuilder.clientCert();
                 peer.setTLSCertificateKeyPair(tlsCertificateKeyPair);
             }
+
             discoveryEndpoints.add(peer.getEndpoint());
+
         }
 
         for (Map.Entry<PeerRole, Set<Peer>> peerRole : peerRoleSetMap.entrySet()) {
@@ -698,79 +681,6 @@ public class Channel implements Serializable {
 
         }
         return this;
-    }
-
-    private void addPeerMSPIDMap(final Peer peer) {
-        Properties properties = peer.getProperties();
-
-        if (null != properties) {
-            final String mspid = properties.getProperty(Peer.PEER_ORGANIZATION_MSPID_PROPERTY);
-            if (!isNullOrEmpty(mspid)) {
-                logger.debug(format("Channel %s mapping peer %s to mspid %s", name, peer, mspid));
-                synchronized (peerMSPIDMap) {
-                    peerMSPIDMap.computeIfAbsent(mspid, k -> new HashSet<Peer>()).add(peer);
-                }
-            }
-        }
-    }
-
-    private void removePeerMSPIDMap(final Peer peer) {
-        Properties properties = peer.getProperties();
-
-        if (null != properties) {
-            final String mspid = properties.getProperty(Peer.PEER_ORGANIZATION_MSPID_PROPERTY);
-            if (!isNullOrEmpty(mspid)) {
-                logger.debug(format("Channel %s removing mapping peer %s to mspid %s", name, peer, mspid));
-                synchronized (peerMSPIDMap) {
-                    final Collection<Peer> peers = peerMSPIDMap.get(mspid);
-                    if (peers != null) {
-                        peers.remove(peer);
-                        if (peers.isEmpty()) {
-                            peerMSPIDMap.remove(mspid);
-                        }
-
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Get peers that belong to an organization from the organization's MSPID
-     * These values may not be available till after the channel is initialized.
-     *
-     * @param mspid The organizaiions MSPID
-     * @return A collection of Peers that belong to the organization with that mspid.
-     * @throws InvalidArgumentException
-     */
-
-    public Collection<Peer> getPeersForOrganization(String mspid) throws InvalidArgumentException {
-
-        if (isNullOrEmpty(mspid)) {
-            throw new InvalidArgumentException("The mspid parameter may not be null or empty string.");
-        }
-        synchronized (peerMSPIDMap) {
-
-            final Collection<Peer> peers = peerMSPIDMap.get(mspid);
-            if (peers == null) {
-                return Collections.emptySet();
-            } else {
-                return new LinkedList<>(peers); // return a copy.
-            }
-        }
-    }
-
-    /**
-     * Collection of strings which are the MSPIDs of all the peer organization added.
-     * These values may not be available till after the channel is initialized.
-     *
-     * @return The collection of mspids
-     */
-
-    public Collection<String> getPeersOrganizationMSPIDs() {
-        synchronized (peerMSPIDMap) {
-            return new LinkedList<>(peerMSPIDMap.keySet());
-        }
     }
 
     /**
@@ -906,7 +816,6 @@ public class Channel implements Serializable {
         } catch (Exception e) {
             logger.error(format("%s removing peer %s due to exception %s", toString(), peer, e.getMessage()));
             peers.remove(peer);
-            removePeerMSPIDMap(peer);
             logger.error(e);
             throw new ProposalException(e.getMessage(), e);
         }
@@ -914,11 +823,7 @@ public class Channel implements Serializable {
         return this;
     }
 
-    private Block getConfigBlock(List<Peer> peers) throws ProposalException, InvalidArgumentException {
-        return getConfigBlock(getTransactionContext(), peers);
-    }
-
-    private Block getConfigBlock(TransactionContext transactionContext, List<Peer> peers) throws ProposalException {
+    private Block getConfigBlock(List<Peer> peers) throws ProposalException {
 
         if (shutdown) {
             throw new ProposalException(format("Channel %s has been shutdown.", name));
@@ -928,9 +833,10 @@ public class Channel implements Serializable {
             throw new ProposalException("No peers go get config block");
         }
 
+        TransactionContext transactionContext = null;
         SignedProposal signedProposal = null;
         try {
-
+            transactionContext = getTransactionContext();
             transactionContext.verify(false); // can't verify till we get the config block.
 
             FabricProposal.Proposal proposal = GetConfigBlockBuilder.newBuilder()
@@ -957,7 +863,7 @@ public class Channel implements Serializable {
                     ProposalResponse pro = resp.iterator().next();
 
                     if (pro.getStatus() == ProposalResponse.Status.SUCCESS) {
-                        logger.trace(format("getConfigBlock from peer %s on channel %s success", peer, name));
+                        logger.trace(format("getConfigBlock from peer %s on channel %s success", peer.getName(), name));
                         return Block.parseFrom(pro.getProposalResponse().getResponse().getPayload().toByteArray());
                     } else {
                         lastException = new ProposalException(format("getConfigBlock for channel %s failed with peer %s.  Status %s, details: %s",
@@ -1003,7 +909,6 @@ public class Channel implements Serializable {
         peers.remove(peer);
         peerOptionsMap.remove(peer);
         peerEndpointMap.remove(peer.getEndpoint());
-        removePeerMSPIDMap(peer);
 
         for (Set<Peer> peerRoleSet : peerRoleSetMap.values()) {
             peerRoleSet.remove(peer);
@@ -1034,16 +939,6 @@ public class Channel implements Serializable {
         orderer.setChannel(this);
         ordererEndpointMap.put(orderer.getEndpoint(), orderer);
         orderers.add(orderer);
-        final Properties properties = orderer.getProperties();
-        if (properties != null) {
-            final String mspid = properties.getProperty(Orderer.ORDERER_ORGANIZATION_MSPID_PROPERTY);
-            if (!isNullOrEmpty(mspid)) {
-                synchronized (ordererMSPIDMap) {
-                    ordererMSPIDMap.computeIfAbsent(mspid, k -> new HashSet<>()).add(orderer);
-                }
-            }
-        }
-
         return this;
     }
 
@@ -1062,58 +957,7 @@ public class Channel implements Serializable {
         ordererEndpointMap.remove(orderer.getEndpoint());
         orderers.remove(orderer);
         orderer.shutdown(true);
-        final Properties properties = orderer.getProperties();
-        if (properties != null) {
-            final String mspid = properties.getProperty(Orderer.ORDERER_ORGANIZATION_MSPID_PROPERTY);
-            if (!isNullOrEmpty(mspid)) {
-                synchronized (ordererMSPIDMap) {
-                    final Collection<Orderer> orderers = ordererMSPIDMap.get(mspid);
-                    orderers.remove(orderer);
-                    if (orderers.isEmpty()) {
-                        ordererMSPIDMap.remove(mspid);
-                    }
-                }
-            }
-        }
 
-    }
-
-    /**
-     * Get orderers that belong to an organization from the organization's MSPID
-     * These values may not be available till after the channel is initialized.
-     *
-     * @param mspid The organizaiions MSPID
-     * @return A collection of Orderers that belong to the organization with that mspid.
-     * @throws InvalidArgumentException
-     */
-
-    public Collection<Orderer> getOrderersForOrganization(String mspid) throws InvalidArgumentException {
-
-        if (isNullOrEmpty(mspid)) {
-            throw new InvalidArgumentException("The mspid parameter may not be null or empty string.");
-        }
-        synchronized (ordererMSPIDMap) {
-
-            final Collection<Orderer> orderers = ordererMSPIDMap.get(mspid);
-            if (orderers == null) {
-                return Collections.emptySet();
-            } else {
-                return new LinkedList<>(orderers); // return a copy.
-            }
-        }
-    }
-
-    /**
-     * Collection of strings which are the MSPIDs of all the orderer organization added.
-     * These values may not be available till after the channel is initialized.
-     *
-     * @return The collection of mspids
-     */
-
-    public Collection<String> getOrderersOrganizationMSPIDs() {
-        synchronized (ordererMSPIDMap) {
-            return new LinkedList<>(ordererMSPIDMap.keySet());
-        }
     }
 
     public PeerOptions getPeersOptions(Peer peer) {
@@ -1259,15 +1103,10 @@ public class Channel implements Serializable {
 
         }
 
-        if (peers.isEmpty()) {
-            logger.warn(format("Channel %s has no peers during initialization.", name));
-
-        } else {
-            try {
-                loadCACertificates(false);  // put all MSP certs into cryptoSuite if this fails here we'll try again later.
-            } catch (Exception e) {
-                logger.warn(format("Channel %s could not load peer CA certificates from any peers.", name));
-            }
+        try {
+            loadCACertificates(false);  // put all MSP certs into cryptoSuite if this fails here we'll try again later.
+        } catch (Exception e) {
+            logger.warn(format("Channel %s could not load peer CA certificates from any peers.", name));
         }
         Collection<Peer> serviceDiscoveryPeers = getServiceDiscoveryPeers();
         if (!serviceDiscoveryPeers.isEmpty()) {
@@ -1350,7 +1189,7 @@ public class Channel implements Serializable {
                 return;
             }
             if (null == orderer) {
-                logger.debug(format("Channel %s doing channel update adding new orderer mspid: %s, endpoint: %s", name, sdOrderer.getMspid(), sdOrderer.getEndPoint()));
+                logger.debug(format("Channel %s doing channel update adding new orderer endpoint: %s", name, sdOrderer.getEndPoint()));
 
                 sdOrdererAddition.addOrderer(new SDOrdererAdditionInfo() {
 
@@ -1392,16 +1231,6 @@ public class Channel implements Serializable {
                     public Map<String, Orderer> getEndpointMap() {
                         return Collections.unmodifiableMap(Channel.this.ordererEndpointMap);
                     }
-
-                    @Override
-                    public Properties getProperties() {
-                        return sdOrderer.getProperties();
-                    }
-
-                    @Override
-                    public boolean isTLS() {
-                        return sdOrderer.isTLS();
-                    }
                 });
             }
 
@@ -1430,20 +1259,19 @@ public class Channel implements Serializable {
         });
 
         for (SDEndorser sdEndorser : sdNetwork.getEndorsers()) {
-            final String sdEndorserMspid = sdEndorser.getMspid();
             Peer peer = peerEndpointMap.get(sdEndorser.getEndpoint());
             if (null == peer) {
                 if (shutdown) {
                     return;
                 }
 
-                logger.debug(format("Channel %s doing channel update found new peer mspid: %s, endpoint: %s", name, sdEndorserMspid, sdEndorser.getEndpoint()));
+                logger.debug(format("Channel %s doing channel update found new peer endpoint %s", name, sdEndorser.getEndpoint()));
 
                 sdPeerAddition.addPeer(new SDPeerAdditionInfo() {
 
                     @Override
                     public String getMspId() {
-                        return sdEndorserMspid;
+                        return sdEndorser.getMspid();
                     }
 
                     @Override
@@ -1480,43 +1308,7 @@ public class Channel implements Serializable {
                         return Collections.unmodifiableMap(Channel.this.peerEndpointMap);
                     }
 
-                    @Override
-                    public String getName() {
-                        return sdEndorser.getName();
-                    }
-
-                    @Override
-                    public Properties getProperties() {
-                        Properties properties = new Properties();
-                        if (asLocalhost) {
-                            properties.put("hostnameOverride",
-                                    sdEndorser.getName().substring(0, sdEndorser.getName().lastIndexOf(':')));
-                        }
-                        return properties;
-                    }
-
-                    @Override
-                    public boolean isTLS() {
-                        return sdEndorser.isTLS();
-                    }
                 });
-            } else if (discoveryEndpoints.contains(sdEndorser.getEndpoint())) {
-
-                //hackfest here....  if the user didn't supply msspid retro fit for disovery peers
-                if (peer.getProperties() == null || isNullOrEmpty(peer.getProperties().getProperty(Peer.PEER_ORGANIZATION_MSPID_PROPERTY))) {
-
-                    synchronized (peerMSPIDMap) {
-                        peerMSPIDMap.computeIfAbsent(sdEndorserMspid, k -> new HashSet<>()).add(peer);
-                    }
-                    Properties properties = peer.getProperties();
-                    if (properties == null) {
-                        properties = new Properties();
-                    }
-                    properties.put(Peer.PEER_ORGANIZATION_MSPID_PROPERTY, sdEndorserMspid);
-                    peer.setProperties(properties);
-
-                }
-
             }
 
         }
@@ -1531,7 +1323,6 @@ public class Channel implements Serializable {
     }
 
     public interface SDPeerAdditionInfo {
-        String getName();
 
         String getMspId();
 
@@ -1571,9 +1362,6 @@ public class Channel implements Serializable {
 
         Map<String, Peer> getEndpointMap();
 
-        Properties getProperties();
-
-        boolean isTLS();
     }
 
     public interface SDPeerAddition {
@@ -1585,9 +1373,7 @@ public class Channel implements Serializable {
     transient SDPeerAddition sdPeerAddition = null;
 
     /**
-     * Set service discovery orderer addition override.
-     * <p>
-     * Any service discovery properties {@link #setServiceDiscoveryProperties(Properties)} should be set before calling this.
+     * Set service discovery peer addition override.
      *
      * @param sdOrdererAddition
      * @return
@@ -1598,29 +1384,7 @@ public class Channel implements Serializable {
 
         this.sdOrdererAddition = sdOrdererAddition;
 
-        if (null == ret) {
-            ret = new SDOrdererDefaultAddition(getServiceDiscoveryProperties());
-        }
-
         return ret;
-
-    }
-
-    /**
-     * Get current service discovery orderer addition override.
-     * <p>
-     * Any service discovery properties {@link #setServiceDiscoveryProperties(Properties)} should be set before calling this.
-     *
-     * @return SDOrdererAddition
-     */
-
-    public SDOrdererAddition getSDOrdererAddition() {
-
-        if (null == sdOrdererAddition) {
-            sdOrdererAddition = new SDOrdererDefaultAddition(getServiceDiscoveryProperties());
-        }
-
-        return sdOrdererAddition;
 
     }
 
@@ -1639,8 +1403,6 @@ public class Channel implements Serializable {
     public interface SDOrdererAdditionInfo {
 
         String getEndpoint();
-
-        Properties getProperties();
 
         String getMspId();
 
@@ -1677,8 +1439,6 @@ public class Channel implements Serializable {
         }
 
         Map<String, Orderer> getEndpointMap();
-
-        boolean isTLS();
     }
 
     public interface SDOrdererAddition {
@@ -1691,10 +1451,10 @@ public class Channel implements Serializable {
 
     private Properties serviceDiscoveryProperties = new Properties();
 
-    public static class SDOrdererDefaultAddition implements SDOrdererAddition {
-        protected final Properties config;
+    private static class SDOrdererDefaultAddition implements SDOrdererAddition {
+        private final Properties config;
 
-        public SDOrdererDefaultAddition(Properties config) {
+        SDOrdererDefaultAddition(Properties config) {
             this.config = config == null ? new Properties() : (Properties) config.clone();
 
         }
@@ -1702,34 +1462,34 @@ public class Channel implements Serializable {
         @Override
         public Orderer addOrderer(SDOrdererAdditionInfo sdOrdererAdditionInfo) throws InvalidArgumentException, ServiceDiscoveryException {
 
-            Properties properties = sdOrdererAdditionInfo.getProperties();
+            Properties properties = new Properties();
             final String endpoint = sdOrdererAdditionInfo.getEndpoint();
             final String mspid = sdOrdererAdditionInfo.getMspId();
 
-            String protocol = (String) findClientProp(config, "protocol", mspid, endpoint, sdOrdererAdditionInfo.isTLS() ? "grpcs:" : "grpc:");
+            String protocol = findClientProp(config, "protocol", mspid, endpoint, "grpcs:");
 
-            String clientCertFile = (String) findClientProp(config, "clientCertFile", mspid, endpoint, null);
+            String clientCertFile = findClientProp(config, "clientCertFile", mspid, endpoint, null);
 
             if (null != clientCertFile) {
                 properties.put("clientCertFile", clientCertFile);
             }
 
-            String clientKeyFile = (String) findClientProp(config, "clientKeyFile", mspid, endpoint, null);
+            String clientKeyFile = findClientProp(config, "clientKeyFile", mspid, endpoint, null);
             if (null != clientKeyFile) {
                 properties.put("clientKeyFile", clientKeyFile);
             }
 
-            byte[] clientCertBytes = (byte[]) findClientProp(config, "clientCertBytes", mspid, endpoint, null);
+            String clientCertBytes = findClientProp(config, "clientCertBytes", mspid, endpoint, null);
             if (null != clientCertBytes) {
                 properties.put("clientCertBytes", clientCertBytes);
             }
 
-            byte[] clientKeyBytes = (byte[]) findClientProp(config, "clientKeyBytes", mspid, endpoint, null);
+            String clientKeyBytes = findClientProp(config, "clientKeyBytes", mspid, endpoint, null);
             if (null != clientKeyBytes) {
                 properties.put("clientKeyBytes", clientKeyBytes);
             }
 
-            String hostnameOverride = (String) findClientProp(config, "hostnameOverride", mspid, endpoint, null);
+            String hostnameOverride = findClientProp(config, "hostnameOverride", mspid, endpoint, null);
             if (null != hostnameOverride) {
                 properties.put("hostnameOverride", hostnameOverride);
             }
@@ -1738,8 +1498,6 @@ public class Channel implements Serializable {
             if (pemBytes.length > 0) {
                 properties.put("pemBytes", pemBytes);
             }
-
-            properties.put(Orderer.ORDERER_ORGANIZATION_MSPID_PROPERTY, sdOrdererAdditionInfo.getMspId());
 
             Orderer orderer = sdOrdererAdditionInfo.getClient().newOrderer(endpoint,
                     protocol + "//" + endpoint,
@@ -1750,10 +1508,10 @@ public class Channel implements Serializable {
         }
     }
 
-    public static class SDOPeerDefaultAddition implements SDPeerAddition {
-        protected final Properties config;
+    private static class SDOPeerDefaultAddition implements SDPeerAddition {
+        private final Properties config;
 
-        public SDOPeerDefaultAddition(Properties config) {
+        SDOPeerDefaultAddition(Properties config) {
             this.config = config == null ? new Properties() : (Properties) config.clone();
 
         }
@@ -1761,12 +1519,13 @@ public class Channel implements Serializable {
         @Override
         public Peer addPeer(SDPeerAdditionInfo sdPeerAddition) throws InvalidArgumentException, ServiceDiscoveryException {
 
-            Properties properties = sdPeerAddition.getProperties();
-            final String name = sdPeerAddition.getName();
+            Properties properties = new Properties();
             final String endpoint = sdPeerAddition.getEndpoint();
             final String mspid = sdPeerAddition.getMspId();
 
-            String protocol = (String) findClientProp(config, "protocol", mspid, endpoint, sdPeerAddition.isTLS() ? "grpcs:" : "grpc:");
+            String protocol = findClientProp(config, "protocol", mspid, endpoint, "grpcs:");
+
+            String clientCertFile = findClientProp(config, "clientCertFile", mspid, endpoint, null);
 
             Peer peer = sdPeerAddition.getEndpointMap().get(endpoint); // maybe there already.
             if (null != peer) {
@@ -1774,26 +1533,26 @@ public class Channel implements Serializable {
 
             }
 
-            String clientCertFile = (String) findClientProp(config, "clientCertFile", mspid, endpoint, null);
-
-            byte[] clientCertBytes = (byte[]) findClientProp(config, "clientCertBytes", mspid, endpoint, null);
-            if (null != clientCertBytes) {
-                properties.put("clientCertBytes", clientCertBytes);
-            } else if (null != clientCertFile) {
+            if (null != clientCertFile) {
                 properties.put("clientCertFile", clientCertFile);
             }
 
-            properties.put(Peer.PEER_ORGANIZATION_MSPID_PROPERTY, sdPeerAddition.getMspId());
-
-            byte[] clientKeyBytes = (byte[]) findClientProp(config, "clientKeyBytes", mspid, endpoint, null);
-            String clientKeyFile = (String) findClientProp(config, "clientKeyFile", mspid, endpoint, null);
-            if (null != clientKeyBytes) {
-                properties.put("clientKeyBytes", clientKeyBytes);
-            } else if (null != clientKeyFile) {
+            String clientKeyFile = findClientProp(config, "clientKeyFile", mspid, endpoint, null);
+            if (null != clientKeyFile) {
                 properties.put("clientKeyFile", clientKeyFile);
             }
 
-            String hostnameOverride = (String) findClientProp(config, "hostnameOverride", mspid, endpoint, null);
+            String clientCertBytes = findClientProp(config, "clientCertBytes", mspid, endpoint, null);
+            if (null != clientCertBytes) {
+                properties.put("clientCertBytes", clientCertBytes);
+            }
+
+            String clientKeyBytes = findClientProp(config, "clientKeyBytes", mspid, endpoint, null);
+            if (null != clientKeyBytes) {
+                properties.put("clientKeyBytes", clientKeyBytes);
+            }
+
+            String hostnameOverride = findClientProp(config, "hostnameOverride", mspid, endpoint, null);
             if (null != hostnameOverride) {
                 properties.put("hostnameOverride", hostnameOverride);
             }
@@ -1803,32 +1562,31 @@ public class Channel implements Serializable {
                 properties.put("pemBytes", pemBytes);
             }
 
-            peer = sdPeerAddition.getClient().newPeer(name,
+            peer = sdPeerAddition.getClient().newPeer(endpoint,
                     protocol + "//" + endpoint,
                     properties);
 
             sdPeerAddition.getChannel().addPeer(peer, createPeerOptions().setPeerRoles(
-                    EnumSet.of(PeerRole.ENDORSING_PEER, PeerRole.EVENT_SOURCE, PeerRole.LEDGER_QUERY, PeerRole.CHAINCODE_QUERY, PeerRole.SERVICE_DISCOVERY))); //application can decide on roles.
+                    EnumSet.of(PeerRole.ENDORSING_PEER, PeerRole.EVENT_SOURCE, PeerRole.LEDGER_QUERY, PeerRole.CHAINCODE_QUERY))); //application can decide on roles.
 
             return peer;
         }
     }
 
-    static Object findClientProp(Properties config, final String prop, final String mspid, final String endpoint, String def) {
+    static String findClientProp(Properties config, final String prop, final String mspid, final String endpoint, String def) {
         final String[] split = endpoint.split(":");
         final String endpointHost = split[0];
 
-        Object ret = config.getOrDefault("org.hyperledger.fabric.sdk.discovery.default." + prop, def);
-        ret = config.getOrDefault("org.hyperledger.fabric.sdk.discovery.mspid." + prop + "." + mspid, ret);
-        ret = config.getOrDefault("org.hyperledger.fabric.sdk.discovery.endpoint." + prop + "." + endpointHost, ret);
-        ret = config.getOrDefault("org.hyperledger.fabric.sdk.discovery.endpoint." + prop + "." + endpoint, ret);
+        String ret = config.getProperty("org.hyperledger.fabric.sdk.discovery.default." + prop, def);
+        ret = config.getProperty("org.hyperledger.fabric.sdk.discovery.mspid." + prop + "." + mspid, ret);
+        ret = config.getProperty("org.hyperledger.fabric.sdk.discovery.endpoint." + prop + "." + endpointHost, ret);
+        ret = config.getProperty("org.hyperledger.fabric.sdk.discovery.endpoint." + prop + "." + endpoint, ret);
         return ret;
+
     }
 
     /**
      * Set service discovery peer addition override.
-     * <p>
-     * Any service discovery properties {@link #setServiceDiscoveryProperties(Properties)} should be set before calling this.
      *
      * @param sdPeerAddition
      * @return
@@ -1839,29 +1597,7 @@ public class Channel implements Serializable {
 
         this.sdPeerAddition = sdPeerAddition;
 
-        if (ret == null) {
-            ret = new SDOPeerDefaultAddition(getServiceDiscoveryProperties());
-        }
-
         return ret;
-
-    }
-
-    /**
-     * Get current service discovery peer addition override.
-     * <p>
-     * Any service discovery properties {@link #setServiceDiscoveryProperties(Properties)} should be set before calling this.
-     *
-     * @return SDOrdererAddition
-     */
-
-    public SDPeerAddition getSDPeerAddition() {
-
-        if (null == sdPeerAddition) {
-            sdPeerAddition = new SDOPeerDefaultAddition(getServiceDiscoveryProperties());
-        }
-
-        return sdPeerAddition;
 
     }
 
@@ -1933,7 +1669,7 @@ public class Channel implements Serializable {
 
                 ArrayList<DeliverResponse> deliverResponses = new ArrayList<>();
 
-                seekBlock(getTransactionContext(), seekInfo, deliverResponses, orderer);
+                seekBlock(seekInfo, deliverResponses, orderer);
 
                 DeliverResponse blockresp = deliverResponses.get(1);
                 Block configBlock = blockresp.getBlock();
@@ -2443,22 +2179,22 @@ public class Channel implements Serializable {
     /**
      * Provide the Channel's latest raw Configuration Block.
      *
-     * @param orderer
      * @return Channel configuration block.
      * @throws TransactionException
      */
 
-    private Block getConfigurationBlock(TransactionContext transactionContext, Orderer orderer) throws TransactionException {
+    private Block getConfigurationBlock() throws TransactionException {
 
         logger.debug(format("getConfigurationBlock for channel %s", name));
 
         try {
+            Orderer orderer = getRandomOrderer();
 
-            long lastConfigIndex = getLastConfigIndex(transactionContext, orderer);
+            long lastConfigIndex = getLastConfigIndex(orderer);
 
             logger.debug(format("Last config index is %d", lastConfigIndex));
 
-            Block configBlock = getBlockByNumber(transactionContext, orderer, lastConfigIndex);
+            Block configBlock = getBlockByNumber(lastConfigIndex);
 
             //Little extra parsing but make sure this really is a config block for this channel.
             Envelope envelopeRet = Envelope.parseFrom(configBlock.getData().getData(0));
@@ -2526,69 +2262,7 @@ public class Channel implements Serializable {
     }
 
     /**
-     * Get channel configuration from a specific Orderer
-     *
-     * @param userContext The user to sign the action.
-     * @param orderer     To retrieve the configuration from.
-     * @return Configuration block.
-     * @throws InvalidArgumentException
-     * @throws TransactionException
-     */
-
-    public byte[] getChannelConfigurationBytes(User userContext, Orderer orderer) throws InvalidArgumentException, TransactionException {
-
-        try {
-            Block configBlock = getConfigurationBlock(getTransactionContext(userContext), orderer);
-
-            Envelope envelopeRet = Envelope.parseFrom(configBlock.getData().getData(0));
-
-            Payload payload = Payload.parseFrom(envelopeRet.getPayload());
-
-            ConfigEnvelope configEnvelope = ConfigEnvelope.parseFrom(payload.getData());
-            return configEnvelope.getConfig().toByteArray();
-
-        } catch (Exception e) {
-            throw new TransactionException(e);
-        }
-
-    }
-
-    /**
-     * Get channel configuration from a specific peer
-     *
-     * @param userContext The user to sign the action.
-     * @param peer        To retrieve the configuration from.
-     * @return Configuration block.
-     * @throws InvalidArgumentException
-     * @throws TransactionException
-     */
-
-    public byte[] getChannelConfigurationBytes(User userContext, Peer peer) throws InvalidArgumentException, TransactionException {
-
-        try {
-            Block configBlock = getConfigBlock(getTransactionContext(userContext), Arrays.asList(peer));
-
-            Envelope envelopeRet = Envelope.parseFrom(configBlock.getData().getData(0));
-
-            Payload payload = Payload.parseFrom(envelopeRet.getPayload());
-
-            ConfigEnvelope configEnvelope = ConfigEnvelope.parseFrom(payload.getData());
-            return configEnvelope.getConfig().toByteArray();
-
-        } catch (Exception e) {
-            throw new TransactionException(e);
-        }
-
-    }
-
-    public byte[] getChannelConfigurationBytes() throws InvalidArgumentException, TransactionException {
-        return getChannelConfigurationBytes(client.getUserContext());
-    }
-
-    /**
      * Channel Configuration bytes. Bytes that can be used with configtxlator tool to upgrade the channel.
-     * If Peers exist on the channel config block will be retrieved from them.
-     * If only Orderers exist the configblock is retrieved from them.
      * Convert to Json for editing  with:
      * {@code
      * <p>
@@ -2601,45 +2275,9 @@ public class Channel implements Serializable {
      * @throws TransactionException
      */
 
-    public byte[] getChannelConfigurationBytes(User userContext) throws InvalidArgumentException, TransactionException {
-        Block configBlock = null;
+    public byte[] getChannelConfigurationBytes() throws TransactionException {
         try {
-
-            Collection<Peer> peers = getShuffledPeers();
-
-            if (!peers.isEmpty()) { // prefer peers.
-                configBlock = getConfigBlock(getTransactionContext(userContext), new ArrayList<>(peers));
-
-            } else { // no peers so look to orderers.
-
-                List<Orderer> shuffledOrderers = getShuffledOrderers();
-                if (shuffledOrderers.isEmpty()) {
-                    throw new InvalidArgumentException(format("Channel %s has no peer or orderers defined. Can not get configuration block", name));
-                }
-                StringBuilder sb = new StringBuilder(1000);
-                Exception fe = null;
-                String sep = "";
-                for (Orderer orderer : shuffledOrderers) {
-                    try {
-                        configBlock = getConfigurationBlock(getTransactionContext(userContext), orderer);
-                        fe = null; // looks good.
-                        break;
-                    } catch (Exception e) {
-                        fe = e;
-                        sb.append(sep).append(orderer.toString()).append("-").append(e.getMessage());
-                        sep = ", ";
-
-                    }
-
-                }
-                if (fe != null) {
-                    throw new TransactionException(sb.toString(), fe);
-                }
-
-            }
-            if (configBlock == null) {
-                throw new TransactionException("Transaction block could not be retrieved.");
-            }
+            final Block configBlock = getConfigBlock(getShuffledPeers());
 
             Envelope envelopeRet = Envelope.parseFrom(configBlock.getData().getData(0));
 
@@ -2654,9 +2292,8 @@ public class Channel implements Serializable {
 
     }
 
-    private long getLastConfigIndex(TransactionContext transactionContext, Orderer orderer) throws TransactionException, InvalidProtocolBufferException {
-        Block latestBlock;
-        latestBlock = getLatestBlock(orderer, transactionContext);
+    private long getLastConfigIndex(Orderer orderer) throws TransactionException, InvalidProtocolBufferException {
+        Block latestBlock = getLatestBlock(orderer);
 
         BlockMetadata blockMetadata = latestBlock.getMetadata();
 
@@ -2667,7 +2304,7 @@ public class Channel implements Serializable {
         return lastConfig.getIndex();
     }
 
-    private Block getBlockByNumber(TransactionContext transactionContext, Orderer orderer, final long number) throws TransactionException {
+    private Block getBlockByNumber(final long number) throws TransactionException {
 
         logger.trace(format("getConfigurationBlock for channel %s", name));
 
@@ -2689,7 +2326,7 @@ public class Channel implements Serializable {
 
             ArrayList<DeliverResponse> deliverResponses = new ArrayList<>();
 
-            seekBlock(transactionContext, seekInfo, deliverResponses, orderer);
+            seekBlock(seekInfo, deliverResponses, getRandomOrderer());
 
             DeliverResponse blockresp = deliverResponses.get(1);
 
@@ -2718,7 +2355,7 @@ public class Channel implements Serializable {
 
     }
 
-    private int seekBlock(TransactionContext txContext, SeekInfo seekInfo, List<DeliverResponse> deliverResponses, Orderer ordererIn) throws TransactionException {
+    private int seekBlock(SeekInfo seekInfo, List<DeliverResponse> deliverResponses, Orderer ordererIn) throws TransactionException {
 
         logger.trace(format("seekBlock for channel %s", name));
         final long start = System.currentTimeMillis();
@@ -2732,6 +2369,8 @@ public class Channel implements Serializable {
                 statusRC = 404;
 
                 final Orderer orderer = ordererIn != null ? ordererIn : getRandomOrderer();
+
+                TransactionContext txContext = getTransactionContext();
 
                 DeliverResponse[] deliver = orderer.sendDeliver(createSeekInfoEnvelope(txContext, seekInfo, orderer.getClientTLSCertificateDigest()));
 
@@ -2793,7 +2432,7 @@ public class Channel implements Serializable {
 
     }
 
-    private Block getLatestBlock(Orderer orderer, TransactionContext transactionContext) throws TransactionException {
+    private Block getLatestBlock(Orderer orderer) throws TransactionException {
 
         logger.debug(format("getConfigurationBlock for channel %s", name));
 
@@ -2809,7 +2448,7 @@ public class Channel implements Serializable {
 
         ArrayList<DeliverResponse> deliverResponses = new ArrayList<>();
 
-        seekBlock(transactionContext, seekInfo, deliverResponses, orderer);
+        seekBlock(seekInfo, deliverResponses, orderer);
 
         DeliverResponse blockresp = deliverResponses.get(1);
 
@@ -2856,6 +2495,8 @@ public class Channel implements Serializable {
         if (null == instantiateProposalRequest) {
             throw new InvalidArgumentException("InstantiateProposalRequest is null");
         }
+
+        instantiateProposalRequest.setSubmitted();
 
         checkPeers(peers);
 
@@ -3165,13 +2806,6 @@ public class Channel implements Serializable {
         ArrayList<Peer> peers = new ArrayList<>(getPeers(roles));
         Collections.shuffle(peers);
         return peers;
-    }
-
-    private List<Orderer> getShuffledOrderers() {
-
-        ArrayList<Orderer> orderers = new ArrayList<>(getOrderers());
-        Collections.shuffle(orderers);
-        return orderers;
     }
 
     private Orderer getRandomOrderer() throws InvalidArgumentException {
@@ -3990,9 +3624,6 @@ public class Channel implements Serializable {
         if (transactionProposalRequest.getChaincodeID() == null) {
             throw new InvalidArgumentException("The proposalRequest's chaincode ID is null");
         }
-        if (null == serviceDiscovery) {
-            throw new ServiceDiscoveryException("The channel is not configured with any peers with the 'discover' role");
-        }
         logger.debug(format("Channel %s sendTransactionProposalToEndorsers chaincode name: %s", name, chaincodeName));
 
         TransactionContext transactionContext = getTransactionContext(transactionProposalRequest.getUserContext());
@@ -4036,11 +3667,11 @@ public class Channel implements Serializable {
         logger.trace(format("Channel %s chaincode %s discovered: %s", name, chaincodeName, "" + sdChaindcode));
 
         if (null == sdChaindcode) {
-            throw new ServiceDiscoveryException(format("Channel %s failed to find any endorsers for chaincode %s", name, chaincodeName));
+            throw new ServiceDiscoveryException(format("Channel %s failed to find and endorsers for chaincode %s", name, chaincodeName));
         }
 
         if (sdChaindcode.getLayouts() == null || sdChaindcode.getLayouts().isEmpty()) {
-            throw new ServiceDiscoveryException(format("Channel %s failed to find any endorsers for chaincode %s no layouts found.", name, chaincodeName));
+            throw new ServiceDiscoveryException(format("Channel %s failed to find and endorsers for chaincode %s no layouts found.", name, chaincodeName));
         }
 
         SDChaindcode sdChaindcodeEndorsementCopy = new SDChaindcode(sdChaindcode); //copy. no ignored.
@@ -4184,26 +3815,6 @@ public class Channel implements Serializable {
                             public Map<String, Peer> getEndpointMap() {
                                 return Collections.unmodifiableMap(Channel.this.peerEndpointMap);
                             }
-
-                            @Override
-                            public String getName() {
-                                return sdEndorser.getName();
-                            }
-
-                            @Override
-                            public Properties getProperties() {
-                                Properties properties = new Properties();
-                                if (asLocalhost) {
-                                    properties.put("hostnameOverride",
-                                            sdEndorser.getName().substring(0, sdEndorser.getName().lastIndexOf(':')));
-                                }
-                                return properties;
-                            }
-
-                            @Override
-                            public boolean isTLS() {
-                                return sdEndorser.isTLS();
-                            }
                         });
                     }
                     endorsers.put(sdEndorser, epeer);
@@ -4339,6 +3950,8 @@ public class Channel implements Serializable {
 
         for (Peer peer : peers) {
 
+            proposalRequest.submitted = false;
+
             try {
 
                 Collection<ProposalResponse> proposalResponses = sendProposal(proposalRequest, Collections.singletonList(peer));
@@ -4402,6 +4015,8 @@ public class Channel implements Serializable {
         if (proposalRequest.getChaincodeID() == null) {
             throw new InvalidArgumentException("The proposalRequest's chaincode ID is null");
         }
+
+        proposalRequest.setSubmitted();
 
         try {
             TransactionContext transactionContext = getTransactionContext(proposalRequest.getUserContext());
@@ -5203,21 +4818,6 @@ public class Channel implements Serializable {
 
     public CompletableFuture<TransactionEvent> sendTransaction(Collection<ProposalResponse> proposalResponses,
                                                                TransactionOptions transactionOptions) {
-
-        return doSendTransaction(proposalResponses, transactionOptions)
-                .whenComplete((result, exception) -> logCompletion("sendTransaction", result, exception));
-    }
-
-    private <T> T logCompletion(final String message, final T result, final Throwable exception) {
-
-        if (exception != null) {
-            logger.error("Future completed exceptionally: " + message, exception);
-        }
-        return result;
-    }
-
-    private CompletableFuture<TransactionEvent> doSendTransaction(Collection<ProposalResponse> proposalResponses,
-                                                               TransactionOptions transactionOptions) {
         try {
 
             if (null == transactionOptions) {
@@ -5420,6 +5020,7 @@ public class Channel implements Serializable {
             CompletableFuture<TransactionEvent> future = new CompletableFuture<>();
             future.completeExceptionally(e);
             return future;
+
         }
 
     }
@@ -6023,9 +5624,6 @@ public class Channel implements Serializable {
             }
         }
         peers.clear(); // make sure.
-
-        peerMSPIDMap.clear();
-        ordererMSPIDMap.clear();
 
         peerEndpointMap.clear();
         ordererEndpointMap.clear();

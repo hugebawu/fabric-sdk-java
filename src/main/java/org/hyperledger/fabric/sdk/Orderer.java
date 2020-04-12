@@ -31,14 +31,12 @@ import org.hyperledger.fabric.sdk.helper.Config;
 
 import static java.lang.String.format;
 import static org.hyperledger.fabric.sdk.helper.Utils.checkGrpcUrl;
-import static org.hyperledger.fabric.sdk.helper.Utils.isNullOrEmpty;
 import static org.hyperledger.fabric.sdk.helper.Utils.parseGrpcUrl;
 
 /**
  * The Orderer class represents a orderer to which SDK sends deploy, invoke, or query requests.
  */
 public class Orderer implements Serializable {
-    public static final String ORDERER_ORGANIZATION_MSPID_PROPERTY = "org.hyperledger.fabric.sdk.orderer.organization_mspid";
     private static final Config config = Config.getConfig();
     private static final Log logger = LogFactory.getLog(Orderer.class);
     private static final long serialVersionUID = 4281642068914263247L;
@@ -64,7 +62,7 @@ public class Orderer implements Serializable {
 
         this.name = name;
         this.url = url;
-        this.properties = properties == null ? new Properties() : (Properties) properties.clone(); //keep our own copy.
+        this.properties = properties == null ? null : (Properties) properties.clone(); //keep our own copy.
         logger.trace("Created " + toString());
 
     }
@@ -141,7 +139,6 @@ public class Orderer implements Serializable {
 
         this.channel = channel;
         this.channelName = channel.getName();
-        toString = null; //recalculate
 
     }
 
@@ -256,21 +253,8 @@ public class Orderer implements Serializable {
         id = config.getNextID();
     }
 
-    private transient String toString;
-
     @Override
     public String toString() {
-        String ltoString = toString;
-        if (ltoString == null) {
-            String mspid = "";
-
-            if (properties != null && !isNullOrEmpty(properties.getProperty(ORDERER_ORGANIZATION_MSPID_PROPERTY))) {
-                mspid = ", mspid: " + properties.getProperty(ORDERER_ORGANIZATION_MSPID_PROPERTY);
-            }
-
-            ltoString = "Orderer{id: " + id + ", channelName: " + channelName + ", name:" + name + ", url: " + url + mspid + "}";
-            toString = ltoString;
-        }
-        return ltoString;
+        return "Orderer{id: " + id + ", channelName: " + channelName + ", name:" + name + ", url: " + url + "}";
     }
 } // end Orderer

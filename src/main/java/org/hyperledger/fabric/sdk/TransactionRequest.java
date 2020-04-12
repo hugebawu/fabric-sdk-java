@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Map;
 
+import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
 import org.hyperledger.fabric.sdk.helper.Config;
 
 /**
@@ -25,6 +26,8 @@ import org.hyperledger.fabric.sdk.helper.Config;
  */
 public class TransactionRequest {
     private User userContext;
+
+    boolean submitted = false;
 
     private final Config config = Config.getConfig();
 
@@ -289,6 +292,26 @@ public class TransactionRequest {
      */
     public void setProposalWaitTime(long proposalWaitTime) {
         this.proposalWaitTime = proposalWaitTime;
+    }
+
+    /**
+     * If this request has been submitted already.
+     *
+     * @return true if the already submitted.
+     */
+
+    public boolean isSubmitted() {
+        return submitted;
+    }
+
+    void setSubmitted() throws InvalidArgumentException {
+
+        if (submitted) {
+            // Has already been submitted.
+            throw new InvalidArgumentException("Request has been already submitted and can not be reused.");
+        }
+        User.userContextCheck(userContext);
+        this.submitted = true;
     }
 
     protected TransactionRequest(User userContext) {

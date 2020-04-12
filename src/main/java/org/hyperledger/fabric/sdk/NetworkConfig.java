@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
 import java.io.StringReader;
+import java.lang.reflect.InvocationTargetException;
 import java.security.PrivateKey;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -52,12 +53,14 @@ import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 import org.hyperledger.fabric.sdk.Channel.PeerOptions;
 import org.hyperledger.fabric.sdk.Peer.PeerRole;
+import org.hyperledger.fabric.sdk.exception.CryptoException;
 import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
 import org.hyperledger.fabric.sdk.exception.NetworkConfigurationException;
+import org.hyperledger.fabric.sdk.identity.SigningIdentity;
 import org.hyperledger.fabric.sdk.identity.X509Enrollment;
+import org.hyperledger.fabric.sdk.identity.X509SigningIdentity;
 import org.hyperledger.fabric.sdk.security.CryptoSuite;
 import org.yaml.snakeyaml.Yaml;
-import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import static java.lang.String.format;
 import static org.hyperledger.fabric.sdk.helper.Utils.isNullOrEmpty;
@@ -227,31 +230,6 @@ public class NetworkConfig {
         setNodeProperties("EventHub", name, eventHubs, properties);
     }
 
-    private String getNodeUrl(String type, String name, Map<String, Node> nodes) throws InvalidArgumentException {
-        if (isNullOrEmpty(name)) {
-            throw new InvalidArgumentException("Parameter name is null or empty.");
-        }
-
-        Node node = nodes.get(name);
-        if (node == null) {
-            throw new InvalidArgumentException(format("%s %s not found.", type, name));
-        }
-
-        return node.getUrl();
-    }
-
-    /**
-     * Get URL for a specific peer.
-     *
-     * @param name Name of peer to get the URL for.
-     * @return The peer's URL.
-     * @throws InvalidArgumentException
-     */
-    public String getPeerUrl(String name) throws InvalidArgumentException {
-        return getNodeUrl("Peer", name, peers);
-
-    }
-
     // Organizations, keyed on org name (and not on mspid!)
     private Map<String, OrgInfo> organizations;
 
@@ -335,7 +313,7 @@ public class NetworkConfig {
             throw new InvalidArgumentException("configStream must be specified");
         }
 
-        Yaml yaml = new Yaml(new SafeConstructor());
+        Yaml yaml = new Yaml();
 
         @SuppressWarnings ("unchecked")
         Map<String, Object> map = yaml.load(configStream);
@@ -839,19 +817,9 @@ public class NetworkConfig {
         JsonArray jsonPeers = getJsonValueAsArray(jsonOrg.get("peers"));
         if (jsonPeers != null) {
             for (JsonValue peer : jsonPeers) {
-                final String peerName = getJsonValueAsString(peer);
+                String peerName = getJsonValueAsString(peer);
                 if (peerName != null) {
                     org.addPeerName(peerName);
-                    final Node node = peers.get(peerName);
-                    if (null != node) {
-                        if (null == node.properties) {
-                            node.properties = new Properties();
-                        }
-                        node.properties.put(Peer.PEER_ORGANIZATION_MSPID_PROPERTY, org.getMspId());
-
-                    } else {
-                        throw new NetworkConfigurationException(format("Organization %s has peer %s listed not found in any channel peer list.", orgName, peerName));
-                    }
                 }
             }
         }
@@ -1234,7 +1202,6 @@ public class NetworkConfig {
             return enrollment;
         }
 
-        @Override
         public String getMspId() {
             return mspid;
         }

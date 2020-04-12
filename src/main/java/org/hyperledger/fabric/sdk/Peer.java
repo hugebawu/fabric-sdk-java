@@ -41,15 +41,12 @@ import org.hyperledger.fabric.sdk.transaction.TransactionContext;
 
 import static java.lang.String.format;
 import static org.hyperledger.fabric.sdk.helper.Utils.checkGrpcUrl;
-import static org.hyperledger.fabric.sdk.helper.Utils.isNullOrEmpty;
 import static org.hyperledger.fabric.sdk.helper.Utils.parseGrpcUrl;
 
 /**
  * The Peer class represents a peer to which SDK sends deploy, or query proposals requests.
  */
 public class Peer implements Serializable {
-
-    public static final String PEER_ORGANIZATION_MSPID_PROPERTY = "org.hyperledger.fabric.sdk.peer.organization_mspid";
 
     private static final Config config = Config.getConfig();
     private static final Log logger = LogFactory.getLog(Peer.class);
@@ -99,7 +96,7 @@ public class Peer implements Serializable {
 
         this.url = grpcURL;
         this.name = name;
-        this.properties = properties == null ? new Properties() : (Properties) properties.clone(); //keep our own copy.
+        this.properties = properties == null ? null : (Properties) properties.clone(); //keep our own copy.
 
         logger.debug("Created " + toString());
 
@@ -143,7 +140,10 @@ public class Peer implements Serializable {
 
         this.transactionContext = transactionContext.retryTransactionSameContext();
 
-        if (peerEventingClient == null && !shutdown) {
+        if (peerEventingClient == null) {
+
+            //PeerEventServiceClient(Peer peer, ManagedChannelBuilder<?> channelBuilder, Properties properties)
+            //   peerEventingClient = new PeerEventServiceClient(this, new HashSet<Channel>(Arrays.asList(new Channel[] {channel})));
 
             peerEventingClient = new PeerEventServiceClient(this, Endpoint.createEndpoint(url, properties), properties, peersOptions);
 
@@ -165,10 +165,6 @@ public class Peer implements Serializable {
 
     }
 
-    boolean isShutdown() {
-        return shutdown;
-    }
-
     /**
      * Set the channel the peer is on.
      *
@@ -185,7 +181,6 @@ public class Peer implements Serializable {
 
         this.channel = channel;
         this.channelName = channel.getName();
-        toString = null; //recalculated
 
     }
 
@@ -428,12 +423,10 @@ public class Peer implements Serializable {
                         peerOptions.startEvents(startBLockNumber);
                     }
 
-                    if (!shutdown) {
-                        PeerEventServiceClient lpeerEventingClient = new PeerEventServiceClient(Peer.this,
-                                Endpoint.createEndpoint(url, properties), properties, peerOptions);
-                        lpeerEventingClient.connect(fltransactionContext);
-                        peerEventingClient = lpeerEventingClient;
-                    }
+                    PeerEventServiceClient lpeerEventingClient = new PeerEventServiceClient(Peer.this,
+                            Endpoint.createEndpoint(url, properties), properties, peerOptions);
+                    lpeerEventingClient.connect(fltransactionContext);
+                    peerEventingClient = lpeerEventingClient;
 
                 }
             }));
@@ -474,8 +467,7 @@ public class Peer implements Serializable {
     }
 
     void setProperties(Properties properties) {
-        this.properties = properties == null ? new Properties() : properties;
-        toString = null; //recalculated
+        this.properties = properties;
     }
 
     public interface PeerEventingServiceDisconnected {
@@ -570,17 +562,7 @@ public class Peer implements Serializable {
     }
 
     /**
-     * Get current disconnect handler service
-     *
-     * @return The current disconnect handler service.
-     */
-
-    public PeerEventingServiceDisconnected getPeerEventingServiceDisconnected() {
-        return disconnectedHandler;
-    }
-
-    /**
-     * Set class to handle peer eventing service  disconnects
+     * Set class to handle Event hub disconnects
      *
      * @param newPeerEventingServiceDisconnectedHandler New handler to replace.  If set to null no retry will take place.
      * @return the old handler.
@@ -668,21 +650,10 @@ public class Peer implements Serializable {
         return protocol;
     }
 
-    private transient String toString;
-
     @Override
     public String toString() {
-        String ltoString = toString;
-        if (ltoString == null) {
-            String mspid = "";
+        return "Peer{ id: " + id + ", name: " + name + ", channelName: " + channelName + ", url: " + url + "}";
 
-            if (properties != null && !isNullOrEmpty(properties.getProperty(PEER_ORGANIZATION_MSPID_PROPERTY))) {
-                mspid = ", mspid: " + properties.getProperty(PEER_ORGANIZATION_MSPID_PROPERTY);
-            }
-            ltoString = "Peer{ id: " + id + ", name: " + name + ", channelName: " + channelName + ", url: " + url + mspid + "}";
-            toString = ltoString;
-        }
-        return ltoString;
     }
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {

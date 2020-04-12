@@ -47,7 +47,7 @@ For Java applications use the latest published v1.4.x releases:
      <dependency>
          <groupId>org.hyperledger.fabric-sdk-java</groupId>
          <artifactId>fabric-sdk-java</artifactId>
-         <version>1.4.1</version>
+         <version>1.4.0/version>
      </dependency>
 
 ```
@@ -55,6 +55,7 @@ For Java applications use the latest published v1.4.x releases:
 ## Known limitations and restrictions
 
 * TCerts are not supported: JIRA FAB-1401
+* HSM not supported. JIRA FAB-3137
 
 <p &nbsp; />
 <p &nbsp; />
@@ -187,6 +188,7 @@ Then run the Integration tests with:
 ORG_HYPERLEDGER_FABRIC_SDKTEST_INTEGRATIONTESTS_TLS=true mvn clean install -DskipITs=false -Dmaven.test.failure.ignore=false javadoc:javadoc
 
 ### Chaincode endorsement policies
+Policies are described in the [Fabric Endorsement Policies document](https://gerrit.hyperledger.org/r/gitweb?p=fabric.git;a=blob;f=docs/endorsement-policies.md;h=1eecf359c12c3f7c1ddc63759a0b5f3141b07f13;hb=HEAD).
 You create a policy using a Fabric tool ( an example is shown in [JIRA issue FAB-2376](https://jira.hyperledger.org/browse/FAB-2376?focusedCommentId=21121&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-21121))
 and give it to the SDK either as a file or a byte array. The SDK, in turn, will use the policy when it creates chaincode instantiation requests.
 
@@ -279,12 +281,6 @@ The message being returned from the fabric server is too large for the default g
 On the Peer, Orderer, orEventHub add the property `grpc.NettyChannelBuilderOption.maxInboundMessageSize`
 See [End2endIT's constructChannel](https://github.com/hyperledger/fabric-sdk-java/blob/b649868113e969d851720c972f660114b64247bc/src/test/java/org/hyperledger/fabric/sdkintegration/End2endIT.java#L846)
 
-
-### Configuration and setting default values - timeouts etc
-
-The SDK's defaults are all in the file [Config.java](https://github.com/hyperledger/fabric-sdk-java/blob/a2140f9bba57a63c58d9ee8579fea7164bf3beb2/src/main/java/org/hyperledger/fabric/sdk/helper/Config.java#L33-L40)
-The [config.properties](https://github.com/hyperledger/fabric-sdk-java/blob/a2140f9bba57a63c58d9ee8579fea7164bf3beb2/config.properties)
-also has some descriptions on what they do.  Most server timeout request can be overridden with the specific request too.
 
 ### java.security.InvalidKeyException: Illegal key size
 

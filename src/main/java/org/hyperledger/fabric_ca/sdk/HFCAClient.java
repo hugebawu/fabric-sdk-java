@@ -67,7 +67,6 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
-import org.apache.http.NameValuePair;
 import org.apache.http.ParseException;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
@@ -187,6 +186,7 @@ public class HFCAClient {
      * HFCA_ATTRIBUTE_HFGENCRL is an attribute that allows an identity to generate a CRL
      */
     public static final String HFCA_ATTRIBUTE_HFGENCRL = "hf.GenCRL";
+
 
     private static final int CONNECTION_REQUEST_TIMEOUT = config.getConnectionRequestTimeout();
     private static final int CONNECT_TIMEOUT = config.getConnectTimeout();
@@ -475,7 +475,7 @@ public class HFCAClient {
             }
             String body = req.toJson();
 
-            String responseBody = httpPost(getURL(HFCA_ENROLL), body,
+            String responseBody = httpPost(url + HFCA_ENROLL, body,
                     new UsernamePasswordCredentials(user, secret));
 
             logger.debug("response:" + responseBody);
@@ -533,14 +533,7 @@ public class HFCAClient {
 
     public HFCAInfo info() throws InfoException, InvalidArgumentException {
 
-        String infoURL;
-        try {
-            infoURL = getURL(HFCA_INFO);
-        } catch (Exception e) {
-            throw new InvalidArgumentException(e);
-        }
-
-        logger.debug(format("info url:%s", infoURL));
+        logger.debug(format("info url:%s", url));
         if (cryptoSuite == null) {
             throw new InvalidArgumentException("Crypto primitives not set.");
         }
@@ -556,7 +549,7 @@ public class HFCAClient {
             }
             JsonObject body = factory.build();
 
-            String responseBody = httpPost(infoURL, body.toString(),
+            String responseBody = httpPost(url + HFCA_INFO, body.toString(),
                     (UsernamePasswordCredentials) null);
 
             logger.debug("response:" + responseBody);
@@ -568,12 +561,12 @@ public class HFCAClient {
             logger.debug(format("[HFCAClient] enroll success:[%s]", success));
 
             if (!success) {
-                throw new EnrollmentException(format("FabricCA failed info %s", infoURL));
+                throw new EnrollmentException(format("FabricCA failed info %s", url));
             }
 
             JsonObject result = jsonst.getJsonObject("result");
             if (result == null) {
-                throw new InfoException(format("FabricCA info error  - response did not contain a result url %s", infoURL));
+                throw new InfoException(format("FabricCA info error  - response did not contain a result url %s", url));
             }
 
             String caName = result.getString("CAName");
@@ -595,7 +588,7 @@ public class HFCAClient {
             return new HFCAInfo(caName, caChain, version, issuerPublicKey, issuerRevocationPublicKey);
 
         } catch (Exception e) {
-            InfoException ee = new InfoException(format("Url:%s, Failed to get info", infoURL), e);
+            InfoException ee = new InfoException(format("Url:%s, Failed to get info", url), e);
             logger.error(e.getMessage(), e);
             throw ee;
         }
@@ -1097,8 +1090,7 @@ public class HFCAClient {
         return new HFCACertificateRequest();
     }
 
-    /**
-     * idemixEnroll returns an Identity Mixer Enrollment, which supports anonymity and unlinkability
+    /** idemixEnroll returns an Identity Mixer Enrollment, which supports anonymity and unlinkability
      *
      * @param enrollment a x509 enrollment credential
      * @return IdemixEnrollment
@@ -1225,7 +1217,7 @@ public class HFCAClient {
      * are part of the certificate request.
      *
      * @param registrar The identity of the registrar (i.e. who is performing the registration).
-     * @param req       The certificate request that contains filter parameters
+     * @param req The certificate request that contains filter parameters
      * @return HFCACertificateResponse object
      * @throws HFCACertificateException Failed to process get certificate request
      */
@@ -1248,7 +1240,7 @@ public class HFCAClient {
                 logger.debug(format("certificate url: %s, registrar: %s done.", HFCA_CERTIFICATE, registrar));
             }
             return new HFCACertificateResponse(statusCode, certs);
-        } catch (HTTPException e) {
+        }  catch (HTTPException e) {
             String msg = format("[Code: %d] - Error while getting certificates from url '%s': %s", e.getStatusCode(), HFCA_CERTIFICATE, e.getMessage());
             HFCACertificateException certificateException = new HFCACertificateException(msg, e);
             logger.error(msg);
@@ -1260,6 +1252,7 @@ public class HFCAClient {
             throw certificateException;
         }
     }
+
 
     /**
      * Http Post Request.
@@ -1349,7 +1342,7 @@ public class HFCAClient {
     }
 
     JsonObject httpPost(String url, String body, Enrollment enrollment) throws Exception {
-        String authHTTPCert = getHTTPAuthCertificate(enrollment, "POST", url, body);
+        String authHTTPCert = getHTTPAuthCertificate(enrollment,  "POST", url, body);
         return post(url, body, authHTTPCert);
     }
 
@@ -1380,7 +1373,7 @@ public class HFCAClient {
 
     JsonObject httpGet(String url, User registrar, Map<String, String> queryMap) throws Exception {
         String getURL = getURL(url, queryMap);
-        String authHTTPCert = getHTTPAuthCertificate(registrar.getEnrollment(), "GET", getURL, "");
+        String authHTTPCert = getHTTPAuthCertificate(registrar.getEnrollment(),  "GET", getURL, "");
         HttpGet httpGet = new HttpGet(getURL);
         httpGet.setConfig(getRequestConfig());
         logger.debug(format("httpGet %s, authHTTPCert: %s", url, authHTTPCert));
@@ -1698,17 +1691,7 @@ public class HFCAClient {
     String addCAToURL(String url) throws URISyntaxException, MalformedURLException {
         URIBuilder uri = new URIBuilder(url);
         if (caName != null) {
-            boolean found = false;
-
-            for (NameValuePair nameValuePair : uri.getQueryParams()) {
-                if ("ca".equals(nameValuePair.getName())) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                uri.addParameter("ca", caName);
-            }
+            uri.addParameter("ca", caName);
         }
         return uri.build().toURL().toString();
     }

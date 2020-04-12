@@ -20,8 +20,8 @@ import java.io.StringWriter;
 import java.net.MalformedURLException;
 import java.nio.file.Paths;
 import java.security.PrivateKey;
+import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -81,7 +81,6 @@ import static org.hyperledger.fabric.sdk.Channel.PeerOptions.createPeerOptions;
 import static org.hyperledger.fabric.sdk.Channel.TransactionOptions.createTransactionOptions;
 import static org.hyperledger.fabric.sdk.testutils.TestUtils.resetConfig;
 import static org.hyperledger.fabric.sdk.testutils.TestUtils.testRemovingAddingPeersOrderers;
-import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -221,7 +220,7 @@ public class End2endIT {
         sampleOrg = testConfig.getIntegrationTestsSampleOrg("peerOrg2");
         Channel barChannel = constructChannel(BAR_CHANNEL_NAME, client, sampleOrg);
         assertTrue(barChannel.isInitialized());
-        /*
+        /**
          * sampleStore.saveChannel uses {@link Channel#serializeChannel()}
          */
         sampleStore.saveChannel(barChannel);
@@ -695,19 +694,16 @@ public class End2endIT {
                     tm2.put("method", "QueryByChaincodeRequest".getBytes(UTF_8));
                     queryByChaincodeRequest.setTransientMap(tm2);
 
-                    // Try each peer in turn just to confirm the request object can be reused
-                    for (Peer peer : channel.getPeers()) {
-                        Collection<ProposalResponse> queryProposals = channel.queryByChaincode(queryByChaincodeRequest, Collections.singletonList(peer));
-                        for (ProposalResponse proposalResponse : queryProposals) {
-                            if (!proposalResponse.isVerified() || proposalResponse.getStatus() != ProposalResponse.Status.SUCCESS) {
-                                fail("Failed query proposal from peer " + proposalResponse.getPeer().getName() + " status: " + proposalResponse.getStatus() +
-                                        ". Messages: " + proposalResponse.getMessage()
-                                        + ". Was verified : " + proposalResponse.isVerified());
-                            } else {
-                                String payload = proposalResponse.getProposalResponse().getResponse().getPayload().toStringUtf8();
-                                out("Query payload of b from peer %s returned %s", proposalResponse.getPeer().getName(), payload);
-                                assertEquals(payload, expect);
-                            }
+                    Collection<ProposalResponse> queryProposals = channel.queryByChaincode(queryByChaincodeRequest, channel.getPeers());
+                    for (ProposalResponse proposalResponse : queryProposals) {
+                        if (!proposalResponse.isVerified() || proposalResponse.getStatus() != ProposalResponse.Status.SUCCESS) {
+                            fail("Failed query proposal from peer " + proposalResponse.getPeer().getName() + " status: " + proposalResponse.getStatus() +
+                                    ". Messages: " + proposalResponse.getMessage()
+                                    + ". Was verified : " + proposalResponse.isVerified());
+                        } else {
+                            String payload = proposalResponse.getProposalResponse().getResponse().getPayload().toStringUtf8();
+                            out("Query payload of b from peer %s returned %s", proposalResponse.getPeer().getName(), payload);
+                            assertEquals(payload, expect);
                         }
                     }
 
@@ -793,11 +789,12 @@ public class End2endIT {
                     assertEquals(chaincodeEventListenerHandle, chaincodeEventCapture.handle);
                     assertEquals(testTxID, chaincodeEventCapture.chaincodeEvent.getTxId());
                     assertEquals(EXPECTED_EVENT_NAME, chaincodeEventCapture.chaincodeEvent.getEventName());
-                    assertArrayEquals(EXPECTED_EVENT_DATA, chaincodeEventCapture.chaincodeEvent.getPayload());
+                    assertTrue(Arrays.equals(EXPECTED_EVENT_DATA, chaincodeEventCapture.chaincodeEvent.getPayload()));
                     assertEquals(CHAIN_CODE_NAME, chaincodeEventCapture.chaincodeEvent.getChaincodeId());
 
                     BlockEvent blockEvent = chaincodeEventCapture.blockEvent;
                     assertEquals(channelName, blockEvent.getChannelId());
+                    //   assertTrue(channel.getEventHubs().contains(blockEvent.getEventHub()));
 
                 }
 
@@ -963,7 +960,7 @@ public class End2endIT {
                         out("  Transaction number %d has %d actions", i, transactionEnvelopeInfo.getTransactionActionInfoCount());
                         assertEquals(1, transactionEnvelopeInfo.getTransactionActionInfoCount()); // for now there is only 1 action per transaction.
                         out("  Transaction number %d isValid %b", i, transactionEnvelopeInfo.isValid());
-                        assertTrue(transactionEnvelopeInfo.isValid());
+                        assertEquals(transactionEnvelopeInfo.isValid(), true);
                         out("  Transaction number %d validation code %d", i, transactionEnvelopeInfo.getValidationCode());
                         assertEquals(0, transactionEnvelopeInfo.getValidationCode());
 
@@ -1006,7 +1003,7 @@ public class End2endIT {
                                 ChaincodeEvent chaincodeEvent = transactionActionInfo.getEvent();
                                 assertNotNull(chaincodeEvent);
 
-                                assertArrayEquals(EXPECTED_EVENT_DATA, chaincodeEvent.getPayload());
+                                assertTrue(Arrays.equals(EXPECTED_EVENT_DATA, chaincodeEvent.getPayload()));
                                 assertEquals(testTxID, chaincodeEvent.getTxId());
                                 assertEquals(CHAIN_CODE_NAME, chaincodeEvent.getChaincodeId());
                                 assertEquals(EXPECTED_EVENT_NAME, chaincodeEvent.getEventName());
@@ -1083,7 +1080,7 @@ public class End2endIT {
                 }
             }
             if (!TX_EXPECTED.isEmpty()) {
-                fail(TX_EXPECTED.values().toString());
+                fail(TX_EXPECTED.get(0));
             }
         } catch (InvalidProtocolBufferRuntimeException e) {
             throw e.getCause();
