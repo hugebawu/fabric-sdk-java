@@ -4,14 +4,11 @@
 # https://docs.microsoft.com/azure/devops/pipelines/languages/java
 
 trigger:
-  - release-1.4
-
-pr:
-  - release-1.4
+- release-1.4
 
 pool:
-  vmImage: 'ubuntu-18.04'
+  vmImage: 'ubuntu-latest'
 
 steps:
-  - script: |
-      WD=$PWD ./src/test/cirun.sh
+- script: |
+    WD=$PWD ./src/test/cirun.sh
