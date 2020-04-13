@@ -5,3 +5,7 @@ target
 .idea/
 *.iml
 *.resources.prefs
+.settings
+.project
+.classpath
+.vscode
