@@ -85,6 +85,5 @@ do
         *)
             echo $"Usage: $0 {up|down|start|stop|clean|restart}"
             exit 1
-
-esac
+	esac
 done
